@@ -13,16 +13,29 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
+set(MUJOCO_DIR_ENV $ENV{MUJOCO_DIR})
+
 find_path(MUJOCO_INCLUDE_DIR mujoco/mujoco.h
   HINTS /usr/include /usr/local/include
+  PATHS
+    ${MUJOCO_DIR_ENV}/include
+    /opt/mujoco/include
+    /opt/mujoco230/include
+    /opt/homebrew/opt/mujoco/include
 )
 
 find_library(MUJOCO_LIB mujoco
   HINTS /usr/lib /usr/local/lib
+  PATHS
+    ${MUJOCO_DIR_ENV}/lib
+    ${MUJOCO_DIR_ENV}/lib64
+    /opt/mujoco/lib
+    /opt/mujoco/lib64
+    /opt/homebrew/opt/mujoco/lib
 )
 
 if(NOT MUJOCO_INCLUDE_DIR OR NOT MUJOCO_LIB)
-  message(FATAL_ERROR "MuJoCo headers or library not found. Set MUJOCO_INCLUDE_DIR and MUJOCO_LIB if installed in a non-standard path.")
+  message(FATAL_ERROR "MuJoCo headers or library not found. Set MUJOCO_DIR, or pass MUJOCO_INCLUDE_DIR and MUJOCO_LIB when configuring.")
 endif()
 
 include_directories(${MUJOCO_INCLUDE_DIR})

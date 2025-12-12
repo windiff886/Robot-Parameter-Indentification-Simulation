@@ -17,6 +17,13 @@ colcon build --packages-select sim_com_node
 source install/setup.bash
 ```
 
+> MuJoCo 未装在系统默认路径时，可先设置环境变量 `export MUJOCO_DIR=/path/to/mujoco`，或在构建时传参：
+> ```bash
+> colcon build --packages-select sim_com_node --cmake-args \
+>   -DMUJOCO_INCLUDE_DIR=/path/to/mujoco/include \
+>   -DMUJOCO_LIB=/path/to/mujoco/lib/libmujoco.so
+> ```
+
 ## 运行示例
 
 ```bash
