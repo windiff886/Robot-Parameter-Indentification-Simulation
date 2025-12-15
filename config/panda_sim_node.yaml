@@ -1,0 +1,4 @@
+panda_sim_node:
+  ros__parameters:
+    model_path: "franka_emika_panda/scene.xml"
+    publish_rate_hz: 100.0

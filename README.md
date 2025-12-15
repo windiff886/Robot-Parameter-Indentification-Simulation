@@ -2,6 +2,7 @@
 
 - `franka_emika_panda/`：Franka Emika Panda 的 MuJoCo 模型（MJCF）。
 - `src/sim_com_node/`：ROS 2 C++ 节点，使用 MuJoCo 加载机器人并发布关节状态。
+- `config/panda_sim_node.yaml`：节点参数文件（模型路径、发布频率）。
 
 ## 依赖
 
@@ -17,22 +18,16 @@ colcon build --packages-select sim_com_node
 source install/setup.bash
 ```
 
-> MuJoCo 未装在系统默认路径时，可先设置环境变量 `export MUJOCO_DIR=/path/to/mujoco`，或在构建时传参：
-> ```bash
-> colcon build --packages-select sim_com_node --cmake-args \
->   -DMUJOCO_INCLUDE_DIR=/path/to/mujoco/include \
->   -DMUJOCO_LIB=/path/to/mujoco/lib/libmujoco.so
-> ```
-
 ## 运行示例
 
+以组件方式运行节点
+
 ```bash
-ros2 run sim_com_node sim_com_node --ros-args \
-  -p model_path:=/home/windiff/Code/Simulation/franka_emika_panda/scene.xml \
-  -p publish_rate_hz:=200
+ros2 launch sim_com_node panda_sim_node.launch.py
 ```
 
 - 发布话题：`panda/joint_states`（`sensor_msgs/msg/JointState`，包含铰接/滑动关节位置与速度）。
 - 参数：
-  - `model_path`：MJCF 文件路径，默认指向仓库内 `franka_emika_panda/scene.xml`。
-  - `publish_rate_hz`：关节状态发布频率，默认 100 Hz。
+  - `model_path`：MJCF 文件路径，默认指向安装后的包内 `franka_emika_panda/scene.xml`，可在参数文件中覆盖。
+  - `publish_rate_hz`：关节状态发布频率，默认 100 Hz，可在参数文件中调整。
+  - `enable_viewer`：是否启动 GLFW 可视化窗口，默认启用；在无显示环境可设为 `false`。

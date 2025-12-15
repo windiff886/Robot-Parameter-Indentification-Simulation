@@ -43,3 +43,5 @@
 build/
 install/
 log/
+.cache/
+.vscode/
