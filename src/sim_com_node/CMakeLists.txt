@@ -17,6 +17,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 
@@ -54,7 +55,7 @@ target_include_directories(panda_sim_node_component
   PRIVATE
     ${MUJOCO_INCLUDE_DIR})
 target_link_libraries(panda_sim_node_component ${MUJOCO_LIB} glfw)
-ament_target_dependencies(panda_sim_node_component rclcpp rclcpp_components sensor_msgs)
+ament_target_dependencies(panda_sim_node_component rclcpp rclcpp_components sensor_msgs std_msgs)
 ament_target_dependencies(panda_sim_node_component ament_index_cpp)
 
 rclcpp_components_register_nodes(panda_sim_node_component "sim_com_node::PandaSimNode")
@@ -70,6 +71,6 @@ install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../franka_emika_panda
   DESTINATION share/${PROJECT_NAME})
 
-ament_export_dependencies(rclcpp rclcpp_components sensor_msgs ament_index_cpp)
+ament_export_dependencies(rclcpp rclcpp_components sensor_msgs std_msgs ament_index_cpp)
 
 ament_package()

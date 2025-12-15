@@ -3,7 +3,7 @@
  * @brief Panda 机械臂 MuJoCo 仿真节点实现
  *
  * 该节点使用 MuJoCo 物理引擎模拟 Franka Emika Panda 机械臂，
- * 并通过 ROS2 话题发布关节状态信息，同时提供可视化窗口。
+ * 并通过 ROS2 话题发布关节状态信息，订阅力矩指令，同时提供可视化窗口。
  */
 
 #include "sim_com_node/panda_sim_node.hpp"
@@ -12,14 +12,91 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <chrono>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
 #include <GLFW/glfw3.h>
 
 namespace fs = std::filesystem;
+
+namespace
+{
+
+std::string trim_copy(const std::string & input)
+{
+  const auto first = input.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {
+    return "";
+  }
+  const auto last = input.find_last_not_of(" \t\r\n");
+  return input.substr(first, last - first + 1);
+}
+
+std::optional<double> parse_yaml_double(const std::string & trimmed_line, const std::string & key)
+{
+  if (trimmed_line.rfind(key, 0) != 0) {
+    return std::nullopt;
+  }
+
+  std::size_t pos = key.size();
+  while (pos < trimmed_line.size() && std::isspace(static_cast<unsigned char>(trimmed_line[pos]))) {
+    ++pos;
+  }
+  if (pos >= trimmed_line.size() || trimmed_line[pos] != ':') {
+    return std::nullopt;
+  }
+
+  std::string value = trim_copy(trimmed_line.substr(pos + 1));
+  const auto comment = value.find('#');
+  if (comment != std::string::npos) {
+    value = trim_copy(value.substr(0, comment));
+  }
+
+  if (value.size() >= 2 && (
+      (value.front() == '"' && value.back() == '"') ||
+      (value.front() == '\'' && value.back() == '\'')))
+  {
+    value = value.substr(1, value.size() - 2);
+  }
+
+  try {
+    return std::stod(value);
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
+}
+
+std::optional<double> read_publish_rate_hz(const fs::path & config_path)
+{
+  std::ifstream file(config_path);
+  if (!file) {
+    return std::nullopt;
+  }
+
+  std::string line;
+  while (std::getline(file, line)) {
+    const std::string trimmed = trim_copy(line);
+    if (trimmed.empty() || trimmed[0] == '#') {
+      continue;
+    }
+
+    if (auto v = parse_yaml_double(trimmed, "publish_rate_hz")) {
+      return v;
+    }
+    if (auto v = parse_yaml_double(trimmed, "publish_rate")) {
+      return v;
+    }
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace
 
 namespace sim_com_node
 {
@@ -31,25 +108,41 @@ namespace sim_com_node
 PandaSimNode::PandaSimNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("panda_sim_node", options)
 {
-  // ========== 1. 参数声明与模型路径解析 ==========
-  fs::path default_model;
+  // ========== 1. 配置文件与模型路径解析 ==========
+  fs::path share_dir;
   try {
     // 尝试从 ROS2 包共享目录获取默认模型路径
-    const auto share_dir = ament_index_cpp::get_package_share_directory("sim_com_node");
-    default_model = fs::path(share_dir) / "franka_emika_panda" / "scene.xml";
+    share_dir = ament_index_cpp::get_package_share_directory("sim_com_node");
   } catch (const std::exception &) {
-    // 回退到相对路径
-    default_model = fs::path("franka_emika_panda") / "scene.xml";
+    // ignore
   }
 
-  // 声明 ROS2 参数
-  const std::string model_param =
-    this->declare_parameter<std::string>("model_path", default_model.string());
-  const double publish_rate_hz = this->declare_parameter<double>("publish_rate_hz", 100.0);
-  viewer_enabled_ = this->declare_parameter<bool>("enable_viewer", true);
+  const fs::path config_path = share_dir.empty()
+    ? fs::path("config") / "panda_sim_node.yaml"
+    : share_dir / "config" / "panda_sim_node.yaml";
+
+  const double default_publish_rate_hz = 100.0;
+  const auto publish_rate_from_config = read_publish_rate_hz(config_path);
+  const double publish_rate_hz = publish_rate_from_config.value_or(default_publish_rate_hz);
+  if (!publish_rate_from_config) {
+    RCLCPP_WARN(
+      get_logger(), "publish_rate_hz not found in %s; using default %.1f Hz",
+      fs::absolute(config_path).string().c_str(), default_publish_rate_hz);
+  } else {
+    RCLCPP_INFO(
+      get_logger(), "publish_rate_hz=%.1f Hz (config: %s)",
+      publish_rate_hz, fs::absolute(config_path).string().c_str());
+  }
+  if (publish_rate_hz <= 0.0) {
+    throw std::runtime_error("Invalid publish_rate_hz in config: " + config_path.string());
+  }
+
+  const fs::path model_path = share_dir.empty()
+    ? fs::path("franka_emika_panda") / "scene.xml"
+    : share_dir / "franka_emika_panda" / "scene.xml";
 
   // 验证模型文件存在
-  const fs::path resolved_model = fs::absolute(model_param);
+  const fs::path resolved_model = fs::absolute(model_path);
   if (!fs::exists(resolved_model)) {
     throw std::runtime_error("Model file not found: " + resolved_model.string());
   }
@@ -66,6 +159,9 @@ PandaSimNode::PandaSimNode(const rclcpp::NodeOptions & options)
   if (!data_) {
     throw std::runtime_error("Failed to allocate MuJoCo data");
   }
+
+  // 初始化力矩指令缓冲区
+  torque_command_.resize(model_->nu, 0.0);
 
   // ========== 3. 初始位姿设置 ==========
   // 如果模型定义了 "home" 关键帧，则重置到该位姿
@@ -98,20 +194,24 @@ PandaSimNode::PandaSimNode(const rclcpp::NodeOptions & options)
   // 创建关节状态发布器
   joint_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("panda/joint_states", 10);
 
+  // 创建力矩指令订阅器
+  torque_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+    "panda/joint_torques", 10,
+    std::bind(&PandaSimNode::torque_callback, this, std::placeholders::_1));
+
   // 创建定时器，按指定频率执行仿真步进和状态发布
   const auto period = std::chrono::duration<double>(1.0 / publish_rate_hz);
   timer_ = this->create_wall_timer(period, std::bind(&PandaSimNode::step, this));
 
   RCLCPP_INFO(
-    get_logger(), "Loaded model from %s, publishing %zu joints at %.1f Hz",
+    get_logger(), "Loaded model from %s, publishing %zu joints at %.1f Hz (torque control mode)",
     resolved_model.string().c_str(), joint_indices_.size(), publish_rate_hz);
+  RCLCPP_INFO(
+    get_logger(), "Subscribing to torque commands on 'panda/joint_torques' (%d actuators)",
+    model_->nu);
 
   // ========== 6. 可视化窗口启动 ==========
-  if (viewer_enabled_) {
-    start_viewer();
-  } else {
-    RCLCPP_INFO(get_logger(), "MuJoCo viewer disabled (enable with enable_viewer:=true)");
-  }
+  start_viewer();
 }
 
 /**
@@ -123,21 +223,54 @@ PandaSimNode::~PandaSimNode()
 }
 
 /**
+ * @brief 力矩指令回调 - 接收并存储力矩指令
+ * @param msg 力矩指令消息（Float64MultiArray）
+ *
+ * 力矩向量应包含 8 个元素（7 个关节 + 1 个夹爪 tendon）
+ */
+void PandaSimNode::torque_callback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(torque_mutex_);
+
+  const std::size_t expected_size = static_cast<std::size_t>(model_->nu);
+  if (msg->data.size() != expected_size) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *this->get_clock(), 1000,
+      "Received torque command with %zu elements, expected %zu",
+      msg->data.size(), expected_size);
+    return;
+  }
+
+  // 复制力矩指令
+  torque_command_ = msg->data;
+}
+
+/**
  * @brief 仿真步进回调 - 执行一步物理仿真并发布关节状态
  *
  * 该函数由定时器周期性调用，完成以下任务：
- * 1. 推进 MuJoCo 仿真一个时间步
- * 2. 读取各关节的位置和速度
- * 3. 发布 JointState 消息到 ROS2 话题
+ * 1. 应用力矩指令到 MuJoCo 控制输入
+ * 2. 推进 MuJoCo 仿真一个时间步
+ * 3. 读取各关节的位置和速度
+ * 4. 发布 JointState 消息到 ROS2 话题
  */
 void PandaSimNode::step()
 {
   std::vector<double> positions(joint_indices_.size());
   std::vector<double> velocities(joint_indices_.size());
+  std::vector<double> efforts(joint_indices_.size());
 
   {
     // 使用互斥锁保护仿真数据，避免与渲染线程冲突
     std::lock_guard<std::mutex> lock(data_mutex_);
+
+    // 应用力矩指令到 MuJoCo 控制输入
+    {
+      std::lock_guard<std::mutex> torque_lock(torque_mutex_);
+      for (std::size_t i = 0; i < torque_command_.size() && i < static_cast<std::size_t>(model_->nu); ++i) {
+        data_->ctrl[i] = torque_command_[i];
+      }
+    }
 
     // 推进仿真一个时间步（使用模型定义的 timestep）
     mj_step(model_.get(), data_.get());
@@ -149,6 +282,7 @@ void PandaSimNode::step()
       const int qvel_adr = model_->jnt_dofadr[j];   // 速度数组中的索引
       positions[i] = data_->qpos[qpos_adr];
       velocities[i] = data_->qvel[qvel_adr];
+      efforts[i] = data_->qfrc_actuator[qvel_adr];
     }
   }
 
@@ -158,6 +292,7 @@ void PandaSimNode::step()
   msg.name = joint_names_;
   msg.position = std::move(positions);
   msg.velocity = std::move(velocities);
+  msg.effort = std::move(efforts);
 
   joint_pub_->publish(std::move(msg));
 }

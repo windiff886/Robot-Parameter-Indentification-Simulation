@@ -4,18 +4,19 @@ from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description():
+    """启动力矩控制器节点（参数从配置文件直接读取）."""
     return LaunchDescription(
         [
             ComposableNodeContainer(
-                name="panda_sim_container",
+                name="force_controller_container",
                 package="rclcpp_components",
-                executable="component_container_mt",
+                executable="component_container",
                 namespace="",
                 composable_node_descriptions=[
                     ComposableNode(
-                        package="sim_com_node",
-                        plugin="sim_com_node::PandaSimNode",
-                        name="panda_sim_node",
+                        package="force_node",
+                        plugin="force_node::ForceControllerNode",
+                        name="force_controller_node",
                     )
                 ],
                 output="screen",

@@ -1,0 +1,14 @@
+# Force Controller Node 参数配置
+force_controller_node:
+  ros__parameters:
+    # 控制频率 (Hz)
+    control_rate_hz: 1000.0
+
+    # PD 控制器位置增益 (7 个关节)
+    kp: [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]
+
+    # PD 控制器速度增益/阻尼 (7 个关节)
+    kd: [50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0]
+
+    # 目标位置 - home 位姿 (rad)
+    target_position: [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853]

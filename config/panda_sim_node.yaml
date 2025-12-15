@@ -1,4 +1,3 @@
-panda_sim_node:
-  ros__parameters:
-    model_path: "franka_emika_panda/scene.xml"
-    publish_rate_hz: 100.0
+# sim_com_node config
+# JointState publish rate (Hz).
+publish_rate_hz: 100.0
