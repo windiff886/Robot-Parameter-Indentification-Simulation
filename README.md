@@ -1,121 +1,84 @@
-## 概览
+# 机器人动力学参数辨识系统
 
-- `franka_emika_panda/`：Franka Emika Panda 的 MuJoCo 模型（MJCF）。
-- `src/sim_com_node/`：ROS 2 C++ 仿真节点，使用 MuJoCo 加载机器人，发布关节状态并接收力矩指令。
-- `src/force_node/`：ROS 2 C++ 力矩控制器节点，订阅关节状态并发布力矩指令（内置 PD 控制器示例）。
-- `config/panda_sim_node.yaml`：sim_com_node 配置文件（发布频率）。
-- `config/force_controller_node.yaml`：force_node 配置文件（控制参数）。
-- `src/launch/`：联合启动文件。
+本项目实现了基于 BIRDy 框架的机器人动力学参数辨识系统，包含 MuJoCo 仿真、ROS 2 控制节点和 C++ 动力学库。
 
-## 系统架构
+> **声明**：本项目参考了 [BIRDy (Benchmark for Identification of Robot Dynamics)](https://github.com/TUM-ICS/BIRDY) 开源项目。
 
-```
-┌─────────────────┐     panda/joint_states      ┌─────────────────┐
-│                 │ ──────────────────────────► │                 │
-│  sim_com_node   │ (position, velocity, effort)│   force_node    │
-│  (MuJoCo 仿真)   │                             │  (力矩控制器)    │
-│                 │ ◄────────────────────────── │                 │
-└─────────────────┘     panda/joint_torques     └─────────────────┘
-                          (torque command)
-```
+---
 
-## 依赖
+## 🚀 快速开始 (Quick Start)
 
-- MuJoCo 2.3.3+ 头文件和库（如安装在非标准路径，构建时通过 `MUJOCO_INCLUDE_DIR` 和 `MUJOCO_LIB` 指定）。
-- ROS 2（已配置好 `colcon` 和环境）。
-- GLFW3（用于可视化窗口）。
-
-## 构建
-
-在工作区根目录执行：
+### 1. 构建项目
 
 ```bash
-colcon build --packages-select sim_com_node force_node
+colcon build
 source install/setup.bash
 ```
 
-## 运行示例
+### 2. 运行仿真流程
 
-### 1. 一次性启动仿真和控制器
+启动 MuJoCo 仿真器和控制器，开始采集数据：
 
 ```bash
 ros2 launch src/launch/panda_sim_with_controller.launch.py
 ```
 
-两个节点在同一容器中运行，通信效率更高。
+### 3. 运行参数辨识
 
-### 2. 仅运行仿真节点（无控制，机械臂因重力下垂）
-
-```bash
-ros2 launch sim_com_node panda_sim_node.launch.py
-```
-
-### 3. 仅运行力矩控制器
+使用采集到的数据进行离线辨识：
 
 ```bash
-ros2 launch force_node force_controller_node.launch.py
+# 默认使用 OLS 算法
+ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv>
+
+# 指定其他算法 (如抗噪声的 IRLS 或 在线估计的 EKF)
+ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv> algorithm:=IRLS
+ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv> algorithm:=EKF
+
 ```
 
-控制器会将机械臂稳定在 home 位姿。
+---
 
-### 4. 手动发布力矩指令
+## 📂 项目架构 (Project Architecture)
 
-```bash
-# 发布力矩指令（8 个元素：7 关节 + 1 夹爪）
-ros2 topic pub /panda/joint_torques std_msgs/msg/Float64MultiArray \
-  "{data: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+```
+├── franka_emika_panda/          # MuJoCo 机器人模型 (MJCFxml 等)
+├── BIRDy/                       # MATLAB 参考实现 (原始基准项目)
+├── src/
+│   ├── sim_com_node/            # MuJoCo 仿真通信节点
+│   ├── force_node/              # C++ 核心动力学库 & 轨迹生成
+│   │   ├── include/robot/       # 动力学计算 (RNEA, Coriolis, etc.)
+│   │   └── src/                 # 实现代码
+│   ├── identification/          # 参数辨识节点 (OLS)
+│   └── launch/                  # ROS 2 启动脚本
+├── doc/                         # 项目文档
+└── config/                      # 配置文件
 ```
 
-## 话题
+---
 
-| 话题名称 | 消息类型 | 方向 | 说明 |
-|---------|---------|------|------|
-| `panda/joint_states` | `sensor_msgs/JointState` | 仿真 → 控制器 | 关节位置、速度、力矩 |
-| `panda/joint_torques` | `std_msgs/Float64MultiArray` | 控制器 → 仿真 | 力矩指令（8 维） |
+## 🧠 核心算法 (Core Algorithms)
 
-## 参数
+本项目实现了完整的刚体动力学计算与参数辨识流程。
 
-### sim_com_node
+### 1. 动力学计算
+实现了基于拉格朗日形式的动力学方程 ($M, C, G$ 矩阵计算) 与正/逆动力学求解。
+原理详见 [动力学计算文档](doc/dynamics_calculation.md)。
 
-sim_com_node 从 `config/panda_sim_node.yaml` 读取配置。
+### 2. 参数辨识
+采用线性参数化方法 ($W \beta = \tau$)，支持 OLS, WLS, IRLS, EKF 等多种算法。
+算法详见 [参数辨识文档](doc/parameter_identification.md)。
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `publish_rate_hz` | double | 100.0 | 关节状态发布频率 (Hz) |
+### 3. 激励轨迹
+使用有限项 Fourier 级数生成周期性激励轨迹，并通过优化观测矩阵的条件数 (Condition Number) 来提高辨识的鲁棒性。
 
-### force_node
+---
 
-force_node 从 `config/force_controller_node.yaml` 读取配置。
+## 📚 文档索引 (Documentation)
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `control_rate_hz` | double | 1000.0 | 控制频率 (Hz) |
-| `kp` | double[] | [600, 600, 600, 600, 250, 150, 50] | PD 控制器位置增益 |
-| `kd` | double[] | [50, 50, 50, 50, 30, 25, 15] | PD 控制器速度增益 |
-| `target_position` | double[] | [0, 0, 0, -1.57, 0, 1.57, -0.79] | 目标位置 (rad) |
-
-## 控制模式说明
-
-模型使用 **纯力矩控制模式**：
-- `data->ctrl[i]` 直接作为关节力矩 (τ = ctrl)
-- 关节 1-4 力矩范围：±87 Nm
-- 关节 5-7 力矩范围：±12 Nm
-- 夹爪力矩范围：±20 N
-
-## 自定义控制器
-
-修改 `src/force_node/src/force_controller_node.cpp` 中的 `compute_torque()` 函数：
-
-```cpp
-std::vector<double> ForceControllerNode::compute_torque(
-  const std::vector<double> & q,
-  const std::vector<double> & dq)
-{
-  std::vector<double> torques(8, 0.0);
-
-  // 在这里实现你的控制算法
-  // 例如：计算动力学、阻抗控制、轨迹跟踪等
-
-  return torques;
-}
-```
+*   [**工作模式说明 (Working Modes)**](doc/BIRDy_working_mode.md)
+    *   详细介绍仿真模式与实验模式的流程与区别。
+*   [**动力学计算 (Dynamics Calculation)**](doc/dynamics_calculation.md)
+    *   深入解析 $M, C, G$ 矩阵的数学推导与代码实现。
+*   [**参数辨识 (Parameter Identification)**](doc/parameter_identification.md)
+    *   解释各种辨识算法 (OLS, EKF, ML, CLOE) 的原理与数学推导。

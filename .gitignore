@@ -45,3 +45,6 @@ install/
 log/
 .cache/
 .vscode/
+BIRDy/
+*_pycache__
+data/
