@@ -82,3 +82,5 @@ ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your
     *   深入解析 $M, C, G$ 矩阵的数学推导与代码实现。
 *   [**参数辨识 (Parameter Identification)**](doc/parameter_identification.md)
     *   解释各种辨识算法 (OLS, EKF, ML, CLOE) 的原理与数学推导。
+*   [**轨迹安全检查 (Trajectory Safety)**](doc/Trajectory_Safety_Mechanism.md)
+    *   说明防止机械臂自碰撞与地面碰撞的安全检查机制。

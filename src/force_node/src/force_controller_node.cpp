@@ -4,6 +4,7 @@
  */
 
 #include "force_node/force_controller_node.hpp"
+#include "robot/robot_kinematics.hpp"
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
@@ -186,11 +187,41 @@ void ForceControllerNode::init_excitation_trajectory() {
   trajectory_ = std::make_unique<trajectory::FourierTrajectory>(
       n_dof, n_harmonics, period, q0);
 
-  // 设置随机系数 (较小幅度以保持安全)
-  trajectory_->setRandomCoefficients(0.3); // 幅度 0.3 rad
+  // 设置随机系数 (尝试多次直到找到安全轨迹)
+  const int max_attempts = 50;
+  bool valid_trajectory = false;
+  double amplitude = 0.2; // 初始幅度较小
 
-  // 应用初始条件约束 (q̇(0) = 0, q̈(0) = 0)
-  trajectory_->applyInitialConditionConstraints();
+  robot::RobotKinematics kinematics(*robot_model_);
+
+  for (int attempt = 0; attempt < max_attempts; ++attempt) {
+    trajectory_->setRandomCoefficients(amplitude);
+    trajectory_->applyInitialConditionConstraints();
+
+    if (check_trajectory(*trajectory_)) {
+      valid_trajectory = true;
+      RCLCPP_INFO(get_logger(),
+                  "Found valid excitation trajectory after %d attempts "
+                  "(amplitude: %.2f)",
+                  attempt + 1, amplitude);
+      break;
+    } else {
+      // 如果一直找不到，可以尝试减小幅度?
+      // 这里策略暂定为：前20次尝试默认幅度，之后稍微减小
+      if (attempt > 20 && amplitude > 0.05) {
+        amplitude *= 0.9;
+      }
+    }
+  }
+
+  if (!valid_trajectory) {
+    RCLCPP_WARN(get_logger(),
+                "Could not find a valid trajectory after %d attempts! Using "
+                "the last generated one (MAY BE UNSAFE).",
+                max_attempts);
+  } else {
+    RCLCPP_INFO(get_logger(), "Trajectory safety check passed.");
+  }
 
   RCLCPP_INFO(get_logger(), "Generated Fourier excitation trajectory:");
   RCLCPP_INFO(get_logger(), "  Harmonics: %zu, Period: %.1f s", n_harmonics,
@@ -235,6 +266,60 @@ void ForceControllerNode::init_excitation_trajectory() {
 
   // 启动数据记录
   start_data_recording(data_path.string());
+}
+
+bool ForceControllerNode::check_trajectory(
+    const trajectory::FourierTrajectory &traj) {
+  const double dt = 0.1; // 检查步长
+  robot::RobotKinematics kinematics(*robot_model_);
+  const auto &limits = robot_model_->jointLimits();
+
+  for (double t = 0.0; t <= trajectory_duration_; t += dt) {
+    auto point = traj.evaluate(t);
+    Eigen::VectorXd q = point.q;
+
+    // 1. 检查关节限位
+    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+      if (q(i) < limits[i].q_min || q(i) > limits[i].q_max) {
+        // RCLCPP_DEBUG(get_logger(), "Trajectory violates joint limit %zu at
+        // t=%.2f: %.3f (min: %.3f, max: %.3f)",
+        //             i, t, q(i), limits[i].min, limits[i].max);
+        return false;
+      }
+    }
+
+    // 2. 检查所有关节/连杆坐标系的离地高度
+    // 使用正运动学计算所有坐标系变换
+    auto transforms = kinematics.computeAllTransforms(q);
+
+    for (size_t i = 0; i < transforms.size(); ++i) {
+      double z = transforms[i](2, 3); // Z 坐标
+      // 检查是否低于安全平面
+      if (z < SAFETY_PLANE_Z) {
+        // RCLCPP_DEBUG(get_logger(), "Trajectory violates ground collision at
+        // link %zu, t=%.2f: z=%.3f < %.3f",
+        //             i, t, z, SAFETY_PLANE_Z);
+        return false;
+      }
+    }
+
+    // 3. 检查夹爪尖端位置 (Gripper Tip)
+    // 假设夹爪安装在末端连杆的 Z 轴方向
+    // P_tip = P_ee + R_ee * [0, 0, GRIPPER_LENGTH]^T
+    auto T_ee = transforms.back();
+    Eigen::Vector3d p_ee = T_ee.block<3, 1>(0, 3);
+    Eigen::Matrix3d R_ee = T_ee.block<3, 3>(0, 0);
+    Eigen::Vector3d offset_local(0.0, 0.0, GRIPPER_LENGTH);
+    Eigen::Vector3d p_tip = p_ee + R_ee * offset_local;
+
+    if (p_tip.z() < SAFETY_PLANE_Z) {
+      // RCLCPP_WARN(get_logger(), "Trajectory violates gripper tip collision at
+      // t=%.2f: z_tip=%.3f < %.3f",
+      //             t, p_tip.z(), SAFETY_PLANE_Z);
+      return false;
+    }
+  }
+  return true;
 }
 
 void ForceControllerNode::start_data_recording(const std::string &filename) {

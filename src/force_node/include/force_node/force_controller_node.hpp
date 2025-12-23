@@ -103,6 +103,15 @@ private:
   // 机器人模型
   std::unique_ptr<robot::RobotModel> robot_model_;
 
+  /**
+   * @brief 检查轨迹是否安全 (关节限位 + 地面碰撞)
+   */
+  bool check_trajectory(const trajectory::FourierTrajectory &traj);
+
+  // 安全参数
+  static constexpr double SAFETY_PLANE_Z = 0.15; // 地面以上 15cm
+  static constexpr double GRIPPER_LENGTH = 0.20; // 夹爪长度 20cm
+
   // 数据记录
   std::ofstream data_file_;
   bool recording_{false};
