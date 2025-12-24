@@ -1,0 +1,8 @@
+identification_node:
+  ros__parameters:
+    # Algorithm Selection:
+    # 1: OLS, 2: WLS, 3: IRLS, 4: TLS, 5: EKF, 6: ML, 7: CLOE
+    algorithm: 1
+    # Using one of the existing files as default. User can change this.
+    data_file: "/home/windiff/Code/Simulation/data/identification_data_2025-12-19_19-43-06.csv"
+    output_file: "/home/windiff/Code/Simulation/results/identification.yaml"

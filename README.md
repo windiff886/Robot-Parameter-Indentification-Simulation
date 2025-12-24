@@ -28,13 +28,25 @@ ros2 launch src/launch/panda_sim_with_controller.launch.py
 使用采集到的数据进行离线辨识：
 
 ```bash
-# 默认使用 OLS 算法
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv>
+# 默认读取 config/identification.yaml 配置文件
+# 您可以在该文件中修改 data_file, output_file 以及 algorithm
+ros2 launch identification identification.launch.py
+```
 
-# 指定其他算法 (如抗噪声的 IRLS 或 在线估计的 EKF)
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv> algorithm:=IRLS
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/<your_data_file.csv> algorithm:=EKF
+### 4. 配置文件说明
 
+配置文件位于 `config/identification.yaml`，内容示例：
+
+```yaml
+identification_node:
+  ros__parameters:
+    # 算法选择 (Algorithm Selection):
+    # 1: OLS, 2: WLS, 3: IRLS, 4: TLS, 5: EKF, 6: ML, 7: CLOE
+    algorithm: 1
+    # 数据文件路径
+    data_file: "/path/to/data.csv"
+    # 结果输出路径
+    output_file: "/path/to/results/identification.yaml"
 ```
 
 ---

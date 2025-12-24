@@ -1,20 +1,18 @@
+import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
+    # Point to the config file in the project root
+    config = '/home/windiff/Code/Simulation/config/identification.yaml'
+
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'data_file',
-            default_value='',
-            description='Path to the CSV identification data file'
-        ),
         Node(
             package='identification',
             executable='identify_node',
             name='identification_node',
             output='screen',
-            parameters=[{'data_file': LaunchConfiguration('data_file')}]
+            parameters=[config]
         )
     ])
