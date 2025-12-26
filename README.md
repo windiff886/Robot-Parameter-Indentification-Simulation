@@ -41,7 +41,7 @@ ros2 launch identification identification.launch.py
 identification_node:
   ros__parameters:
     # 算法选择 (Algorithm Selection):
-    # 1: OLS, 2: WLS, 3: IRLS, 4: TLS, 5: EKF, 6: ML, 7: CLOE
+    # 0: Benchmark (Run All), 1: OLS, 2: WLS, 3: IRLS, 4: TLS, 5: EKF, 6: ML, 7: CLOE
     algorithm: 1
     # 数据文件路径
     data_file: "/path/to/data.csv"
@@ -69,23 +69,6 @@ identification_node:
 
 ---
 
-## 🧠 核心算法 (Core Algorithms)
-
-本项目实现了完整的刚体动力学计算与参数辨识流程。
-
-### 1. 动力学计算
-实现了基于拉格朗日形式的动力学方程 ($M, C, G$ 矩阵计算) 与正/逆动力学求解。
-原理详见 [动力学计算文档](doc/dynamics_calculation.md)。
-
-### 2. 参数辨识
-采用线性参数化方法 ($W \beta = \tau$)，支持 OLS, WLS, IRLS, EKF 等多种算法。
-算法详见 [参数辨识文档](doc/parameter_identification.md)。
-
-### 3. 激励轨迹
-使用有限项 Fourier 级数生成周期性激励轨迹，并通过优化观测矩阵的条件数 (Condition Number) 来提高辨识的鲁棒性。
-
----
-
 ## 📚 文档索引 (Documentation)
 
 *   [**工作模式说明 (Working Modes)**](doc/BIRDy_working_mode.md)
@@ -96,3 +79,5 @@ identification_node:
     *   解释各种辨识算法 (OLS, EKF, ML, CLOE) 的原理与数学推导。
 *   [**轨迹安全检查 (Trajectory Safety)**](doc/Trajectory_Safety_Mechanism.md)
     *   说明防止机械臂自碰撞与地面碰撞的安全检查机制。
+*   [**辨识算法评估 (Algorithm Evaluation)**](doc/algorithm_evaluation.md)
+    *   介绍仿真模式下的参数真值对比与实验模式下的交叉验证原理。

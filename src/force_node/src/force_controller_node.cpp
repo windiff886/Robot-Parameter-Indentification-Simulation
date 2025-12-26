@@ -81,8 +81,8 @@ bool parse_double_array(const std::string &line, const std::string &key,
 
 struct ForceControllerConfig {
   double control_rate_hz = 1000.0;
-  std::vector<double> kp = {600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0};
-  std::vector<double> kd = {50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0};
+  std::vector<double> kp = {300.0, 300.0, 300.0, 300.0, 125.0, 75.0, 25.0};
+  std::vector<double> kd = {25.0, 25.0, 25.0, 25.0, 15.0, 12.5, 7.5};
   std::vector<double> target_position = {0.0, 0.0,     0.0,    -1.57079,
                                          0.0, 1.57079, -0.7853};
 };
@@ -147,6 +147,20 @@ ForceControllerNode::ForceControllerNode(const rclcpp::NodeOptions &options)
   RCLCPP_INFO(get_logger(), "Created robot model: %s (%zu DOF)",
               robot_model_->name().c_str(), robot_model_->numDOF());
 
+  // Initialize MuJoCo Collision Checker FIRST
+  try {
+    auto pkg_share =
+        ament_index_cpp::get_package_share_directory("sim_com_node");
+    std::string model_path = pkg_share + "/franka_emika_panda/panda.xml";
+    collision_checker_.initialize(model_path);
+    RCLCPP_INFO(get_logger(), "MuJoCo collision checker initialized.");
+  } catch (const std::exception &e) {
+    RCLCPP_ERROR(get_logger(), "Failed to init MuJoCo collision checker: %s",
+                 e.what());
+    // Use throw to stop node initialization if critical safety component fails
+    throw;
+  }
+
   // ========== 3. 初始化激励轨迹 ==========
   init_excitation_trajectory();
 
@@ -160,6 +174,7 @@ ForceControllerNode::ForceControllerNode(const rclcpp::NodeOptions &options)
       "panda/joint_torques", 10);
 
   // ========== 5. 创建控制定时器 ==========
+  // Timer (1000Hz)
   const auto period = std::chrono::duration<double>(1.0 / cfg.control_rate_hz);
   control_timer_ = this->create_wall_timer(
       period, std::bind(&ForceControllerNode::control_loop, this));
@@ -187,10 +202,9 @@ void ForceControllerNode::init_excitation_trajectory() {
   trajectory_ = std::make_unique<trajectory::FourierTrajectory>(
       n_dof, n_harmonics, period, q0);
 
-  // 设置随机系数 (尝试多次直到找到安全轨迹)
-  const int max_attempts = 50;
+  const int max_attempts = 200;
   bool valid_trajectory = false;
-  double amplitude = 0.2; // 初始幅度较小
+  double amplitude = 0.05; // 初始幅度较小 (Reduced from 0.2)
 
   robot::RobotKinematics kinematics(*robot_model_);
 
@@ -281,41 +295,15 @@ bool ForceControllerNode::check_trajectory(
     // 1. 检查关节限位
     for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
       if (q(i) < limits[i].q_min || q(i) > limits[i].q_max) {
-        // RCLCPP_DEBUG(get_logger(), "Trajectory violates joint limit %zu at
-        // t=%.2f: %.3f (min: %.3f, max: %.3f)",
-        //             i, t, q(i), limits[i].min, limits[i].max);
         return false;
       }
     }
 
-    // 2. 检查所有关节/连杆坐标系的离地高度
-    // 使用正运动学计算所有坐标系变换
-    auto transforms = kinematics.computeAllTransforms(q);
-
-    for (size_t i = 0; i < transforms.size(); ++i) {
-      double z = transforms[i](2, 3); // Z 坐标
-      // 检查是否低于安全平面
-      if (z < SAFETY_PLANE_Z) {
-        // RCLCPP_DEBUG(get_logger(), "Trajectory violates ground collision at
-        // link %zu, t=%.2f: z=%.3f < %.3f",
-        //             i, t, z, SAFETY_PLANE_Z);
-        return false;
-      }
-    }
-
-    // 3. 检查夹爪尖端位置 (Gripper Tip)
-    // 假设夹爪安装在末端连杆的 Z 轴方向
-    // P_tip = P_ee + R_ee * [0, 0, GRIPPER_LENGTH]^T
-    auto T_ee = transforms.back();
-    Eigen::Vector3d p_ee = T_ee.block<3, 1>(0, 3);
-    Eigen::Matrix3d R_ee = T_ee.block<3, 3>(0, 0);
-    Eigen::Vector3d offset_local(0.0, 0.0, GRIPPER_LENGTH);
-    Eigen::Vector3d p_tip = p_ee + R_ee * offset_local;
-
-    if (p_tip.z() < SAFETY_PLANE_Z) {
-      // RCLCPP_WARN(get_logger(), "Trajectory violates gripper tip collision at
-      // t=%.2f: z_tip=%.3f < %.3f",
-      //             t, p_tip.z(), SAFETY_PLANE_Z);
+    // 2. MuJoCo Collision Check (High Fidelity)
+    if (collision_checker_.checkCollision(
+            std::vector<double>(q.data(), q.data() + q.size()))) {
+      RCLCPP_WARN(get_logger(), "Collision detected at t=%.2f", t);
+      collision_checker_.printCollisions();
       return false;
     }
   }
@@ -348,6 +336,31 @@ void ForceControllerNode::record_data_point(double t,
                                             const std::vector<double> &tau) {
   if (!recording_ || !data_file_.is_open()) {
     return;
+  }
+
+  if (q.size() < NUM_ARM_JOINTS || qd.size() < NUM_ARM_JOINTS ||
+      tau.size() < NUM_ARM_JOINTS) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                         "Skipping record: insufficient joint data.");
+    return;
+  }
+
+  const auto &limits = robot_model_->jointLimits();
+  if (limits.size() < NUM_ARM_JOINTS) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                         "Skipping record: joint limits unavailable.");
+    return;
+  }
+
+  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+    const double tau_max = limits[i].tau_max;
+    if (std::abs(tau[i]) > tau_max || q[i] < limits[i].q_min ||
+        q[i] > limits[i].q_max) {
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 2000,
+          "Skipping record: torque/position exceeds joint limits.");
+      return;
+    }
   }
 
   data_file_ << std::fixed << std::setprecision(6) << t;
@@ -406,7 +419,15 @@ void ForceControllerNode::control_loop() {
                 current_time);
   }
 
+  // Debug before compute_torque
   auto torques = compute_torque(q, dq);
+
+  // Check for NaN
+  for (double val : torques) {
+    if (std::isnan(val)) {
+      RCLCPP_ERROR(get_logger(), "NaN detected in torques!");
+    }
+  }
 
   // 记录数据
   if (mode_ == ControllerMode::EXCITATION_TRAJECTORY && trajectory_started_ &&
@@ -418,8 +439,13 @@ void ForceControllerNode::control_loop() {
   last_torques_ = torques;
 
   auto msg = std_msgs::msg::Float64MultiArray();
-  msg.data = std::move(torques);
-  torque_pub_->publish(std::move(msg));
+  msg.data = torques; // Copy instead of move
+  // RCLCPP_INFO(get_logger(), "Publishing torque (size %zu)...",
+  // msg.data.size());
+  torque_pub_->publish(msg);
+  // RCLCPP_INFO(get_logger(), "Torque published.");
+
+  // RCLCPP_INFO(get_logger(), "Loop finished (Mock).");
 }
 
 std::vector<double>

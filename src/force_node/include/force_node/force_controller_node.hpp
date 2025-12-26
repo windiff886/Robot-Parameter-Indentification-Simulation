@@ -6,6 +6,7 @@
 #include <std_msgs/msg/float64_multi_array.hpp>
 
 #include "robot/franka_panda.hpp"
+#include "robot/mujoco_collision_checker.hpp"
 #include "trajectory/fourier_trajectory.hpp"
 
 #include <fstream>
@@ -101,7 +102,8 @@ private:
   bool trajectory_finished_{false};
 
   // 机器人模型
-  std::unique_ptr<robot::RobotModel> robot_model_;
+  std::shared_ptr<robot::RobotModel> robot_model_;
+  robot::MujocoCollisionChecker collision_checker_;
 
   /**
    * @brief 检查轨迹是否安全 (关节限位 + 地面碰撞)

@@ -6,9 +6,11 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # find dependencies
+# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 include_directories(
   include
@@ -20,7 +22,6 @@ include_directories(
 file(GLOB ROBOT_SOURCES "src/robot/*.cpp")
 
 # Identification Module Sources
-# Manually list sources to avoid double inclusion of main.cpp if we used *.cpp
 set(ID_SOURCES
   src/identification.cpp
   src/data_loader.cpp
@@ -34,8 +35,8 @@ add_executable(identify_node
 )
 
 target_link_libraries(identify_node Eigen3::Eigen)
-
 ament_target_dependencies(identify_node rclcpp)
+
 
 install(TARGETS identify_node
   DESTINATION lib/${PROJECT_NAME})

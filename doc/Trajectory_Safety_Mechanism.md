@@ -1,68 +1,62 @@
-# 轨迹安全检查机制说明
+# 轨迹安全监测机制 (Trajectory Safety Mechanism)
 
 ## 1. 概述
 
-为了防止在参数辨识过程中，随即生成的激励轨迹导致机械臂发生自碰撞（超出关节限位）或与环境碰撞（触碰地面），我们在力矩控制器节点（`ForceControllerNode`）中引入了轨迹安全检查机制。
+为了确保参数辨识过程中生成的激励轨迹安全可靠，系统在 `ForceControllerNode` 中引入了基于 **MuJoCo 物理引擎** 的高保真碰撞检测机制。
+
+该机制利用 MuJoCo 强大的物理仿真能力，在轨迹生成后、执行前，对整条轨迹进行全面的预检查。只有通过所有安全检查的轨迹才会被允许执行，防止机器人在实验过程中发生自碰撞或与环境（如地面）发生碰撞。
 
 ## 2. 检查原理
 
-在生成每一组 Fourier 级数轨迹后，系统会在正式执行前调用 `check_trajectory` 函数进行全面的安全性验证。
+检查函数 `check_trajectory` 会以 **0.1秒** 为步长，遍历整个轨迹周期（默认10秒），对每个时刻的机器人状态进行以下两层检查：
 
-### 2.1 检查流程
+### 2.1 关节限位检查 (Joint Limits Check)
 
-检查函数会以 **0.1秒** 为步长，遍历整个轨迹周期（默认10秒），对每个时间点的状态进行如下两项检查：
-
-#### A. 关节限位检查 (Joint Limits Check)
-
-检查每一个关节的角度位置 $q_i$ 是否在允许的范围内：
+首先检查每一个关节的角度是否在物理允许范围内：
 $$ q_{min, i} \leq q_i(t) \leq q_{max, i} $$
 
-- **依据**：`robot_model_->jointLimits()` 中定义的物理限位。
-- **作用**：防止机械臂运动超出自身的机械结构限制。
+- **依据**：`robot_model_->jointLimits()`
+- **作用**：防止机械臂运动超出自身的机械结构硬限位。
 
-#### B. 地面碰撞检查 (Ground Collision Check)
+### 2.2 高保真碰撞检查 (High-Fidelity Collision Check)
 
-检查机械臂的**所有连杆**（Links）是否与地面发生碰撞。
+系统使用 MuJoCo 引擎直接加载机器人的 XML 模型 (`panda.xml`) 进行碰撞检测。
+对于每一时刻的关节配置 $q(t)$：
 
-- **方法**：
-    1. 使用正运动学（Forward Kinematics）计算每一个连杆坐标系原点在该时刻的空间位置。
-    2. 获取每个坐标系的 Z 轴高度坐标 $z_{link}$。
+1.  **状态更新**：将 $q(t)$ 设置到 MuJoCo 的 `mjData` 中。
+2.  **正运动学计算**：调用 `mj_fwdPosition` 计算所有几何体的空间位置。
+3.  **碰撞检测**：MuJoCo 引擎自动计算场景中所有几何体对（Geom Pairs）之间的接触。
+    *   **自碰撞 (Self-Collision)**：检测机器人各连杆之间的接触。
+    *   **环境碰撞 (Environment Collision)**：检测机器人与地面或其他环境物体的接触。
+
 - **判据**：
-    $$ z_{link} \geq \text{SAFETY\_PLANE\_Z} $$
-    其中 `SAFETY_PLANE_Z` 设定为 **0.15m (15cm)**。
-- **作用**：确保机械臂的任何部位（包括底座、肘部、末端执行器等）在运动过程中始终保持在地面以上 15cm 的安全高度，避免刮擦或撞击地面。
+   如果 `mjData->ncon` (接触点数量) > 0，则判定为发生碰撞。
 
-#### C. 夹爪尖端检查 (Gripper Tip Check)
+- **优势**：
+    *   相比于简化的胶囊体模型，MuJoCo 使用原始的 Mesh 或精确凸包，检测精度更高。
+    *   能够自动处理复杂的几何形状和接触情况。
 
-由于地面碰撞检查主要基于连杆坐标系原点，对于安装在末端执行器上的夹爪（Gripper），我们需要额外计算其尖端位置进行检查。
+## 3. 系统配置
 
-- **方法**：
-    1. 获取末端执行器（End Effector）的位姿 $T_{ee}$。
-    2. 沿末端局部坐标系的 Z 轴方向平移 `GRIPPER_LENGTH` (20cm) 得到夹爪尖端位置：
-       $$ P_{tip} = P_{ee} + R_{ee} \cdot [0, 0, \text{GRIPPER\_LENGTH}]^T $$
-    3. 检查 $P_{tip}$ 的 Z 坐标。
-- **判据**：
-    $$ P_{tip}.z \geq \text{SAFETY\_PLANE\_Z} $$
-    其中 `SAFETY_PLANE_Z` 设定为 **0.15m**。
-- **作用**：防止在末端朝下运动时，夹爪尖端触碰地面。
+安全监测系统主要依赖以下组件：
 
-## 3. 重试机制 (Retry Logic)
+*   **MujocoCollisionChecker**: 封装了 MuJoCo 上下文 (`mjModel`, `mjData`) 的管理和碰撞检测接口。
+*   **Robot Model**: `panda.xml` (位于 `sim_com_node` 包中)，定义了机器人的运动学树、惯性参数和碰撞几何体。
 
-为了保证能够生成有效的安全轨迹，`init_excitation_trajectory` 函数采用以下策略：
+## 4. 重试策略 (Retry Logic)
 
-1. **随机生成**：使用随机系数生成一组 Fourier 激励轨迹。
-2. **安全验证**：调用上述 `check_trajectory` 函数。
-3. **自动重试**：
-    - 如果验证通过，则采用该轨迹。
-    - 如果验证失败，则丢弃该轨迹并重新生成。
-    - **最大尝试次数**：默认为 **50次**。
-4. **参数调整**：
-    - 初始随机幅度（Amplitude）为 **0.2**。
-    - 如果连续 **20次** 尝试均未找到安全轨迹，系统会自动将随机幅度缩小为原来的 **0.9倍**，以降低轨迹的剧烈程度，提高通过率。
-5. **兜底策略**：
-    - 如果 50 次尝试后仍未找到安全轨迹，系统会输出警告，但不得不使用最后一次生成的轨迹（注意：这可能是不安全的，操作人员应立即停止）。*注：通常情况下，50次尝试足以找到安全轨迹。*
+`init_excitation_trajectory` 函数采用“生成-验证-重试”的逻辑：
 
-## 4. 相关代码
+1.  **随机生成**：使用随机 Fourier 系数生成轨迹。
+2.  **安全验证**：调用 `check_trajectory` 进行上述检查。
+    *   **通过**：立即采用该轨迹。
+    *   **失败**：丢弃轨迹，进入下一次尝试。
+3.  **参数调整**：
+    *   最大尝试次数：**50次**。
+    *   如果连续 **20次** 失败，系统会自动缩小随机幅度（Amplitude *= 0.9），以降低轨迹剧烈程度，提高成功率。
 
-- **源文件**: `src/force_node/src/force_controller_node.cpp`
-- **头文件**: `src/force_node/include/force_node/force_controller_node.hpp`
+## 5. 相关代码
+
+*   **碰撞检测器**: `src/force_node/include/robot/mujoco_collision_checker.hpp`
+*   **控制器实现**: `src/force_node/src/force_controller_node.cpp`
+*   **机器人模型**: `src/sim_com_node/franka_emika_panda/panda.xml`
