@@ -101,20 +101,62 @@ int main(int argc, char **argv) {
 
     bool include_friction = true;
 
-    // Prepare for Evaluation (Simulation Mode)
-    // Create a fresh robot model for ground truth
-    auto gt_robot = robot::createFrankaPanda();
-    robot::Regressor gt_regressor(*gt_robot);
-    Eigen::VectorXd beta_true =
-        gt_regressor.computeParameterVector(include_friction);
+    // ================================================================
+    // Cross-Validation: Split data into training (80%) and validation (20%)
+    // ================================================================
+    const double train_ratio = 0.8;
+    const std::size_t n_train =
+        static_cast<std::size_t>(data.n_samples * train_ratio);
+    const std::size_t n_val = data.n_samples - n_train;
+
+    RCLCPP_INFO(
+        node->get_logger(),
+        "Cross-validation: %zu training samples, %zu validation samples",
+        n_train, n_val);
+
+    // Create training data subset
+    ExperimentData train_data;
+    train_data.n_samples = n_train;
+    train_data.n_dof = data.n_dof;
+    train_data.time =
+        std::vector<double>(data.time.begin(), data.time.begin() + n_train);
+    train_data.q = data.q.topRows(n_train);
+    train_data.qd = data.qd.topRows(n_train);
+    train_data.qdd = data.qdd.topRows(n_train);
+    train_data.tau = data.tau.topRows(n_train);
+
+    // Create validation data subset
+    ExperimentData val_data;
+    val_data.n_samples = n_val;
+    val_data.n_dof = data.n_dof;
+    val_data.time =
+        std::vector<double>(data.time.begin() + n_train, data.time.end());
+    val_data.q = data.q.bottomRows(n_val);
+    val_data.qd = data.qd.bottomRows(n_val);
+    val_data.qdd = data.qdd.bottomRows(n_val);
+    val_data.tau = data.tau.bottomRows(n_val);
+
+    // Build observation matrix for VALIDATION set (for evaluation)
+    auto eval_robot = robot::createFrankaPanda();
+    robot::Regressor eval_regressor(*eval_robot);
+    Eigen::MatrixXd W_val = eval_regressor.computeObservationMatrix(
+        val_data.q.transpose(), val_data.qd.transpose(),
+        val_data.qdd.transpose(), include_friction);
+
+    // Build measured torque vector for VALIDATION set
+    Eigen::VectorXd Tau_meas_val(val_data.n_samples * val_data.n_dof);
+    for (std::size_t i = 0; i < val_data.n_samples; ++i) {
+      for (std::size_t j = 0; j < val_data.n_dof; ++j) {
+        Tau_meas_val(i * val_data.n_dof + j) = val_data.tau(i, j);
+      }
+    }
 
     struct BenchmarkResult {
       std::string name;
       Eigen::VectorXd beta;
-      double rms_error = 0.0;
-      double norm_error = 0.0;
+      double torque_rmse = 0.0;      // Torque prediction RMSE (Nm)
+      double torque_max_error = 0.0; // Max absolute torque error (Nm)
       bool success = false;
-      Eigen::VectorXd error;
     };
     std::vector<BenchmarkResult> results;
 
@@ -127,7 +169,7 @@ int main(int argc, char **argv) {
       res.name = algo_name;
 
       try {
-        res.beta = identifier.solve(data, algo_name, include_friction);
+        res.beta = identifier.solve(train_data, algo_name, include_friction);
 
         // Output short summary
         std::stringstream ss;
@@ -137,95 +179,57 @@ int main(int argc, char **argv) {
         RCLCPP_INFO(node->get_logger(), "Identified %s: [%s]",
                     algo_name.c_str(), ss.str().c_str());
 
-        // Evaluation
-        if (res.beta.size() == beta_true.size()) {
-          res.success = true;
-          res.error = res.beta - beta_true;
-          double mse = res.error.squaredNorm() / res.error.size();
-          res.rms_error = std::sqrt(mse);
-          res.norm_error = res.error.norm();
+        // ============================================================
+        // Cross-Validation Evaluation: Test on VALIDATION set
+        // ============================================================
+        // Compute predicted torque on validation set: tau_pred = W_val * beta
+        Eigen::VectorXd Tau_pred = W_val * res.beta;
 
-          // Detailed Print for single run or just Summary later?
-          // If single run (id != 0), print detailed table as before.
-          if (algorithm_id != 0) {
-            std::cout << std::endl;
-            std::cout << std::string(90, '=') << std::endl;
-            std::cout << "  SIMULATION MODE PARAMETER EVALUATION RESULTS ("
-                      << algo_name << ")" << std::endl;
-            std::cout << std::string(90, '=') << std::endl;
-            std::cout << std::left << std::setw(25) << "Parameter" << std::right
-                      << std::setw(15) << "True Value" << std::setw(15)
-                      << "Estimated" << std::setw(15) << "Abs Error"
-                      << std::setw(15) << "Rel Error (%)" << std::endl;
-            std::cout << std::string(90, '-') << std::endl;
+        // Compute residual on validation set
+        Eigen::VectorXd residual = Tau_meas_val - Tau_pred;
 
-            std::vector<std::string> param_names = {"m",   "mx",  "my",  "mz",
-                                                    "Ixx", "Ixy", "Ixz", "Iyy",
-                                                    "Iyz", "Izz"};
-            int n_links = 7;
-            int params_per_link = 10;
+        // Compute RMSE
+        double mse = residual.squaredNorm() / residual.size();
+        res.torque_rmse = std::sqrt(mse);
 
-            for (int i = 0; i < n_links; ++i) {
-              // Print details logic (same as before)
-              // For brevity in diff, assume standard printing...
-              // Actually, to keep it functional I must copy the printing loop
-              // or make a helper. I will paste the loop here.
-              std::cout << "Link " << (i + 1) << ":" << std::endl;
-              for (int j = 0; j < params_per_link; ++j) {
-                int idx = i * params_per_link + j;
-                double t_val = beta_true(idx);
-                double e_val = res.beta(idx);
-                double abs_err = std::abs(e_val - t_val);
-                double rel_err = (std::abs(t_val) > 1e-9)
-                                     ? (abs_err / std::abs(t_val)) * 100.0
-                                     : 0.0;
-                std::cout << std::left << std::setw(25)
-                          << ("L" + std::to_string(i + 1) + "_" +
-                              param_names[j])
-                          << std::right << std::fixed << std::setprecision(5)
-                          << std::setw(15) << t_val << std::setw(15) << e_val
-                          << std::setw(15) << abs_err << std::setw(14)
-                          << rel_err << "%" << std::endl;
-              }
+        // Compute max absolute error
+        res.torque_max_error = residual.cwiseAbs().maxCoeff();
+
+        res.success = true;
+
+        // Print detailed results for single algorithm run
+        if (algorithm_id != 0) {
+          std::cout << std::endl;
+          std::cout << std::string(70, '=') << std::endl;
+          std::cout << "  TORQUE PREDICTION EVALUATION (" << algo_name << ")"
+                    << std::endl;
+          std::cout << std::string(70, '=') << std::endl;
+          std::cout << std::fixed << std::setprecision(6);
+          std::cout << "  Torque RMSE:        " << res.torque_rmse << " Nm"
+                    << std::endl;
+          std::cout << "  Max Torque Error:   " << res.torque_max_error << " Nm"
+                    << std::endl;
+          std::cout << "  Training Samples:   " << train_data.n_samples
+                    << std::endl;
+          std::cout << "  Validation Samples: " << val_data.n_samples
+                    << std::endl;
+          std::cout << "  Parameters:         " << res.beta.size() << std::endl;
+          std::cout << std::string(70, '-') << std::endl;
+
+          // Per-joint RMSE
+          std::cout << "  Per-Joint Torque RMSE:" << std::endl;
+          for (std::size_t j = 0; j < val_data.n_dof; ++j) {
+            double joint_mse = 0.0;
+            for (std::size_t i = 0; i < val_data.n_samples; ++i) {
+              double r = residual(i * val_data.n_dof + j);
+              joint_mse += r * r;
             }
-
-            if (include_friction) {
-              std::cout << "Friction:" << std::endl;
-              for (int i = 0; i < n_links; ++i) {
-                int base_idx = n_links * params_per_link;
-                double t_fv = beta_true(base_idx + 2 * i);
-                double e_fv = res.beta(base_idx + 2 * i);
-                double err_fv = std::abs(e_fv - t_fv);
-                double rel_fv = (std::abs(t_fv) > 1e-9)
-                                    ? (err_fv / std::abs(t_fv)) * 100.0
-                                    : 0.0;
-                std::cout << std::left << std::setw(25)
-                          << ("J" + std::to_string(i + 1) + "_Fv") << std::right
-                          << std::fixed << std::setprecision(5) << std::setw(15)
-                          << t_fv << std::setw(15) << e_fv << std::setw(15)
-                          << err_fv << std::setw(14) << rel_fv << "%"
-                          << std::endl;
-
-                double t_fc = beta_true(base_idx + 2 * i + 1);
-                double e_fc = res.beta(base_idx + 2 * i + 1);
-                double err_fc = std::abs(e_fc - t_fc);
-                double rel_fc = (std::abs(t_fc) > 1e-9)
-                                    ? (err_fc / std::abs(t_fc)) * 100.0
-                                    : 0.0;
-                std::cout << std::left << std::setw(25)
-                          << ("J" + std::to_string(i + 1) + "_Fc") << std::right
-                          << std::fixed << std::setprecision(5) << std::setw(15)
-                          << t_fc << std::setw(15) << e_fc << std::setw(15)
-                          << err_fc << std::setw(14) << rel_fc << "%"
-                          << std::endl;
-              }
-            }
-            std::cout << std::string(90, '=') << std::endl;
+            joint_mse /= val_data.n_samples;
+            double joint_rmse = std::sqrt(joint_mse);
+            std::cout << "    Joint " << (j + 1) << ": " << std::setw(10)
+                      << joint_rmse << " Nm" << std::endl;
           }
-
-        } else {
-          RCLCPP_WARN(node->get_logger(), "Size mismatch for %s",
-                      algo_name.c_str());
+          std::cout << std::string(70, '=') << std::endl;
         }
 
       } catch (const std::exception &e) {
@@ -239,36 +243,36 @@ int main(int argc, char **argv) {
     // Print Benchmark Summary if multiple algorithms run
     if (algorithm_id == 0) {
       std::cout << std::endl;
-      std::cout << std::string(60, '=') << std::endl;
-      std::cout << "  BENCHMARK SUMMARY (Sorted by RMS Error)" << std::endl;
-      std::cout << std::string(60, '=') << std::endl;
+      std::cout << std::string(70, '=') << std::endl;
+      std::cout << "  BENCHMARK SUMMARY (Sorted by Torque RMSE)" << std::endl;
+      std::cout << std::string(70, '=') << std::endl;
       std::cout << std::left << std::setw(15) << "Algorithm" << std::right
-                << std::setw(20) << "RMS Error" << std::setw(20) << "Norm Error"
-                << std::endl;
-      std::cout << std::string(60, '-') << std::endl;
+                << std::setw(20) << "Torque RMSE (Nm)" << std::setw(20)
+                << "Max Error (Nm)" << std::endl;
+      std::cout << std::string(70, '-') << std::endl;
 
-      // Sort results
+      // Sort results by torque RMSE
       std::sort(results.begin(), results.end(),
                 [](const BenchmarkResult &a, const BenchmarkResult &b) {
                   if (!a.success)
                     return false;
                   if (!b.success)
                     return true;
-                  return a.rms_error < b.rms_error;
+                  return a.torque_rmse < b.torque_rmse;
                 });
 
       for (const auto &res : results) {
         if (res.success) {
           std::cout << std::left << std::setw(15) << res.name << std::right
                     << std::fixed << std::setprecision(6) << std::setw(20)
-                    << res.rms_error << std::setw(20) << res.norm_error
+                    << res.torque_rmse << std::setw(20) << res.torque_max_error
                     << std::endl;
         } else {
           std::cout << std::left << std::setw(15) << res.name << std::right
                     << std::setw(40) << "FAILED / INVALID" << std::endl;
         }
       }
-      std::cout << std::string(60, '=') << std::endl;
+      std::cout << std::string(70, '=') << std::endl;
     }
 
     // 7. Save to YAML if requested
@@ -301,6 +305,7 @@ int main(int argc, char **argv) {
         out << "calibration_date: \""
             << std::put_time(std::localtime(&now_c), "%Y-%m-%d %H:%M:%S")
             << "\"\n";
+        out << "evaluation_method: \"torque_residual_rmse\"\n";
 
         if (algorithm_id == 0) {
           out << "mode: \"BENCHMARK_ALL\"\n";
@@ -308,8 +313,8 @@ int main(int argc, char **argv) {
           for (const auto &res : results) {
             out << "  - algorithm: \"" << res.name << "\"\n";
             if (res.success) {
-              out << "    rms_error: " << res.rms_error << "\n";
-              out << "    norm_error: " << res.norm_error << "\n";
+              out << "    torque_rmse: " << res.torque_rmse << "\n";
+              out << "    torque_max_error: " << res.torque_max_error << "\n";
               out << "    parameters:\n";
               for (int i = 0; i < res.beta.size(); ++i)
                 out << "      - " << res.beta(i) << "\n";
@@ -318,23 +323,16 @@ int main(int argc, char **argv) {
             }
           }
         } else {
-          // Legacy/Single format
+          // Single algorithm format
           const auto &res = results[0];
           out << "algorithm: \"" << res.name << "\"\n";
           if (res.success) {
+            out << "evaluation_results:\n";
+            out << "  torque_rmse: " << res.torque_rmse << "\n";
+            out << "  torque_max_error: " << res.torque_max_error << "\n";
             out << "parameters:\n";
             for (int i = 0; i < res.beta.size(); ++i)
               out << "  - " << res.beta(i) << "\n";
-
-            out << "evaluation_results:\n";
-            out << "  rms_error: " << res.rms_error << "\n";
-            out << "  norm_error: " << res.norm_error << "\n";
-            out << "  parameter_errors:\n";
-            for (int i = 0; i < res.error.size(); ++i)
-              out << "    - " << res.error(i) << "\n";
-            out << "  ground_truth:\n";
-            for (int i = 0; i < beta_true.size(); ++i)
-              out << "    - " << beta_true(i) << "\n";
           }
         }
 

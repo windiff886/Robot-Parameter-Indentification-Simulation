@@ -512,6 +512,14 @@ ForceControllerNode::compute_torque(const std::vector<double> &q,
     }
   }
 
+  // Clamp torques to match MuJoCo's forcerange limits
+  // Joints 1-4: ±87 Nm, Joints 5-7: ±12 Nm
+  constexpr std::array<double, 7> max_torques = {87.0, 87.0, 87.0, 87.0,
+                                                 12.0, 12.0, 12.0};
+  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+    torques[i] = std::clamp(torques[i], -max_torques[i], max_torques[i]);
+  }
+
   torques[7] = 0.0; // 夹爪
   return torques;
 }
