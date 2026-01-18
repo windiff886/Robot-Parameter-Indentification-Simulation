@@ -1,9 +1,9 @@
 #include "identification/data_loader.hpp"
 #include "identification/identification.hpp"
 #include "mujoco_panda_dynamics.hpp"
+#include "mujoco_regressor.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "robot/franka_panda.hpp"
-#include "robot/regressor.hpp"
 #include "robot/robot_dynamics.hpp"
 #include <Eigen/Core>
 #include <chrono>
@@ -97,14 +97,15 @@ int main(int argc, char **argv) {
     identifier.preprocess(data);
 
     // ================================================================
-    // MuJoCo 动力学验证 - 手动实现
+    // MuJoCo 动力学验证
     // ================================================================
     {
       std::cout << std::endl << std::string(70, '=') << std::endl;
       std::cout << "  MUJOCO DYNAMICS VERIFICATION" << std::endl;
       std::cout << std::string(70, '=') << std::endl;
 
-      robot::RobotDynamics rob_dyn(*robot::createFrankaPanda());
+      // 使用 MuJoCoPandaDynamics 进行验证
+      mujoco_dynamics::MuJoCoPandaDynamics mj_dyn;
 
       double sum_sq_error = 0.0;
       double max_error = 0.0;
@@ -115,19 +116,10 @@ int main(int argc, char **argv) {
         Eigen::VectorXd qd_i = data.qd.row(i).transpose();
         Eigen::VectorXd qdd_i = data.qdd.row(i).transpose();
 
-        // Compute ID using RobotDynamics
-        Eigen::MatrixXd M = rob_dyn.computeInertiaMatrix(q_i);
-        Eigen::MatrixXd C = rob_dyn.computeCoriolisMatrix(q_i, qd_i);
-        Eigen::VectorXd g_vec = rob_dyn.computeGravityVector(q_i);
-
-        // Base Dynamics
-        Eigen::VectorXd tau_mj = M * qdd_i + C * qd_i + g_vec;
-
-        // Add Armature (0.1) and Damping (1.0) to match MuJoCo XML
-        for (std::size_t k = 0; k < n_dof; ++k) {
-          tau_mj(k) += 0.1 * qdd_i(k);
-          tau_mj(k) += 1.0 * qd_i(k);
-        }
+        // Compute ID using MuJoCoPandaDynamics
+        // computeInverseDynamics 已经包含了 Armature, Damping, Gravity
+        Eigen::VectorXd tau_mj =
+            mj_dyn.computeInverseDynamics(q_i, qd_i, qdd_i);
 
         for (std::size_t j = 0; j < n_dof; ++j) {
           double err = tau_mj(j) - data.tau(i, j);
@@ -162,18 +154,17 @@ int main(int argc, char **argv) {
 
     // 动力学参数标志：包含 armature 和 damping 以匹配 MuJoCo 模型
     // MuJoCo 默认: armature=0.1, damping=1.0
-    auto param_flags = robot::DynamicsParamFlags::ARMATURE |
-                       robot::DynamicsParamFlags::DAMPING;
+    auto param_flags = mujoco_dynamics::MuJoCoParamFlags::ARMATURE |
+                       mujoco_dynamics::MuJoCoParamFlags::DAMPING;
 
     RCLCPP_INFO(node->get_logger(),
-                "Dynamics model: ARMATURE=%s, DAMPING=%s, FRICTION=%s",
-                robot::hasFlag(param_flags, robot::DynamicsParamFlags::ARMATURE)
+                "Dynamics model: ARMATURE=%s, DAMPING=%s, FRICTION=OFF",
+                mujoco_dynamics::hasFlag(
+                    param_flags, mujoco_dynamics::MuJoCoParamFlags::ARMATURE)
                     ? "ON"
                     : "OFF",
-                robot::hasFlag(param_flags, robot::DynamicsParamFlags::DAMPING)
-                    ? "ON"
-                    : "OFF",
-                robot::hasFlag(param_flags, robot::DynamicsParamFlags::FRICTION)
+                mujoco_dynamics::hasFlag(
+                    param_flags, mujoco_dynamics::MuJoCoParamFlags::DAMPING)
                     ? "ON"
                     : "OFF");
 
@@ -213,8 +204,8 @@ int main(int argc, char **argv) {
     val_data.tau = data.tau.bottomRows(n_val);
 
     // Build observation matrix for VALIDATION set (for evaluation)
-    auto eval_robot = robot::createFrankaPanda();
-    robot::Regressor eval_regressor(*eval_robot);
+    // 使用 MuJoCoRegressor
+    mujoco_dynamics::MuJoCoRegressor eval_regressor;
     Eigen::MatrixXd W_val = eval_regressor.computeObservationMatrix(
         val_data.q.transpose(), val_data.qd.transpose(),
         val_data.qdd.transpose(), param_flags);

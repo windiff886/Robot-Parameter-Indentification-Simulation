@@ -1,10 +1,12 @@
 #include "identification/identification.hpp"
-#include "robot/robot_dynamics.hpp" // Required for CLOE
+#include "mujoco_panda_dynamics.hpp"
 #include <iostream>
+
+using namespace mujoco_dynamics;
 
 Identification::Identification(std::unique_ptr<robot::RobotModel> model)
     : model_(std::move(model)) {
-  regressor_ = std::make_unique<robot::Regressor>(*model_);
+  // MuJoCoRegressor 在成员初始化时自动构造
 }
 
 void Identification::preprocess(ExperimentData &data) {
@@ -20,14 +22,13 @@ void Identification::preprocess(ExperimentData &data) {
   }
 
   // Fallback: Numerical Differentiation for qdd
-  // Using central difference: qdd[i] = (qd[i+1] - qd[i-1]) / (2*dt)
   std::cout << "Preprocessing: computing qdd via numerical differentiation..."
             << std::endl;
 
   data.qdd.resize(data.n_samples, data.n_dof);
 
   for (std::size_t i = 1; i < data.n_samples - 1; ++i) {
-    double dt = data.time[i + 1] - data.time[i - 1]; // spans 2 steps
+    double dt = data.time[i + 1] - data.time[i - 1];
 
     if (dt < 1e-6)
       continue;
@@ -37,7 +38,6 @@ void Identification::preprocess(ExperimentData &data) {
     }
   }
 
-  // Boundary conditions: replicate neighbors
   data.qdd.row(0) = data.qdd.row(1);
   data.qdd.row(data.n_samples - 1) = data.qdd.row(data.n_samples - 2);
 
@@ -47,17 +47,32 @@ void Identification::preprocess(ExperimentData &data) {
   std::cout << "DEBUG: qdd norm: " << data.qdd.norm() << std::endl;
 }
 
+std::size_t Identification::numParameters(MuJoCoParamFlags flags) const {
+  return regressor_.numParameters(flags);
+}
+
+Eigen::VectorXd
+Identification::getGroundTruthParameters(MuJoCoParamFlags flags) const {
+  return regressor_.computeParameterVector(flags);
+}
+
+Eigen::MatrixXd Identification::computeObservationMatrix(
+    const Eigen::MatrixXd &Q, const Eigen::MatrixXd &Qd,
+    const Eigen::MatrixXd &Qdd, MuJoCoParamFlags flags) const {
+  return regressor_.computeObservationMatrix(Q, Qd, Qdd, flags);
+}
+
 Eigen::VectorXd Identification::solve(const ExperimentData &data,
                                       const std::string &algorithm_type,
-                                      robot::DynamicsParamFlags flags) {
+                                      MuJoCoParamFlags flags) {
   if (data.qdd.rows() == 0) {
     throw std::runtime_error("Experiment data not preprocessed: qdd is empty");
   }
 
-  std::cout << "Building observation matrix W..." << std::endl;
+  std::cout << "Building observation matrix W (using MuJoCoRegressor)..."
+            << std::endl;
 
-  // Filter out samples with excessive acceleration (outliers)
-  // Threshold: 10.0 rad/s^2 (Standard is ~0.001 for this trajectory)
+  // Filter out samples with excessive acceleration
   const double qdd_threshold = 10.0;
   std::vector<std::size_t> valid_indices;
   valid_indices.reserve(data.n_samples);
@@ -77,11 +92,7 @@ Eigen::VectorXd Identification::solve(const ExperimentData &data,
             << " outlier samples. " << valid_indices.size()
             << " valid samples remain." << std::endl;
 
-  // Build filtered W and Tau
-  // Cannot verify regressor_ directly via tool, assuming API matches.
-  // Regressor::computeObservationMatrix expects full matrices.
-  // We need to construct subset matrices.
-
+  // Build filtered data matrices
   Eigen::MatrixXd q_valid(valid_indices.size(), data.n_dof);
   Eigen::MatrixXd qd_valid(valid_indices.size(), data.n_dof);
   Eigen::MatrixXd qdd_valid(valid_indices.size(), data.n_dof);
@@ -97,36 +108,22 @@ Eigen::VectorXd Identification::solve(const ExperimentData &data,
     }
   }
 
-  // W: (N*Samples) x (M_params)
-  Eigen::MatrixXd W = regressor_->computeObservationMatrix(
-      q_valid.transpose(), qd_valid.transpose(), qdd_valid.transpose(),
-      flags);
+  // Use MuJoCoRegressor to compute observation matrix
+  Eigen::MatrixXd W = regressor_.computeObservationMatrix(
+      q_valid.transpose(), qd_valid.transpose(), qdd_valid.transpose(), flags);
 
   std::cout << "W size: " << W.rows() << " x " << W.cols() << std::endl;
 
-  int dof = data.n_dof;
+  // Use factory to create solver
+  auto solver = identification::createAlgorithm(algorithm_type, data.n_dof);
 
-  // Handle CLOE case which needs special construction
-  if (algorithm_type == "CLOE") {
-    std::cout << "Initializing CLOE..." << std::endl;
-    // Estimate dt
-    double dt = 0.001;
-    if (data.n_samples > 1) {
-      dt = (data.time.back() - data.time[0]) / (data.n_samples - 1);
-    }
-
-    // Create dynamics instance using the model
-    robot::RobotDynamics dynamics(*model_);
-
-    auto cloe = std::make_unique<identification::CLOE>(dynamics, dof, dt);
-    cloe->setExperimentData(data.q, data.qd, data.tau);
-
-    std::cout << "Solving using CLOE..." << std::endl;
-    return cloe->solve(W, Tau_meas);
+  // CLOE 返回 nullptr，因为它需要 RobotDynamics 引用，目前不支持
+  if (!solver) {
+    std::cout << "WARNING: " << algorithm_type
+              << " algorithm is not fully supported with MuJoCoRegressor. "
+              << "Falling back to OLS." << std::endl;
+    solver = identification::createAlgorithm("OLS", data.n_dof);
   }
-
-  // Use factory for others
-  auto solver = identification::createAlgorithm(algorithm_type, dof);
 
   std::cout << "Solving using " << algorithm_type << "..." << std::endl;
   Eigen::VectorXd beta = solver->solve(W, Tau_meas);

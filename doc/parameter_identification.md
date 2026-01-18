@@ -1,106 +1,190 @@
-# 参数辨识算法说明
+# 机械臂参数辨识：数学过程与代码流程（src/identification）
 
-本文档详细说明了程序中使用的机器人动力学参数辨识算法。包括已迁移的 C++ 实现算法（基于 Eigen）以及 BIRDy 框架中所有支持的算法原理。
+本文档依据 `src/identification` 现有实现总结参数辨识的数学过程与代码流程。核心路径为 `Identification` + `MuJoCoRegressor`，目标是保证回归矩阵与 MuJoCo 动力学一致。
 
-代码位置：`src/identification/src/algorithms.cpp`
+## 1. 范围与入口
 
-## 1. 辨识模型形式
+- 主类与接口: `src/identification/include/identification/identification.hpp`
+- 回归矩阵: `src/identification/include/mujoco_regressor.hpp`
+- 求解算法: `src/identification/include/identification/algorithms.hpp`
+- 数据加载: `src/identification/include/identification/data_loader.hpp`
+- 运行入口: `src/identification/src/main.cpp` (ROS2), `src/identification/src/mujoco_identify.cpp` (CLI)
+- 验证/诊断: `src/identification/src/regressor_test.cpp`, `src/identification/src/model_comparison.cpp`, `src/identification/src/dynamics_diagnostic.cpp`
 
-参数辨识的基础是将动力学方程改写为关于动力学参数的在线性形式：
+## 2. 数据与符号
 
-$$ Y(q, \dot{q}, \ddot{q}) \cdot \beta = \tau $$
+- 关节数: $N_{dof} = 7$
+- 单样本变量: $q, \dot{q}, \ddot{q} \in \mathbb{R}^7$, $\tau \in \mathbb{R}^7$
+- 样本堆叠:
+  - $W \in \mathbb{R}^{(7K) \times M}$
+  - $\tau_{meas} \in \mathbb{R}^{7K}$
+- CSV 格式 (`DataLoader::loadCSV`):
+  - `time, q0..q6, qd0..qd6, [qdd0..qdd6], tau0..tau6`
+  - 若 CSV 不含 `qdd`，则在预处理阶段用数值微分补全
 
-将所有采样时刻堆叠得到超定方程组：
-$$ W \cdot \beta = \mathcal{T}_{meas} $$
+## 3. 参数向量与动力学模型（MuJoCo 规范）
 
-## 2. 离线辨识算法 (C++ 已实现)
+### 3.1 参数向量结构
 
-本系统已移植了 BIRDy 中的核心线性辨识算法，可以通过 `identification_node` 的 `algorithm` 参数进行选择。
+MuJoCoRegressor 使用 MuJoCo 的 Body-Local 坐标系参数（定义在 body 原点）：
 
-### 2.1 普通最小二乘法 (OLS)
-**参数**: `algorithm:="OLS"`
+单个 Body 的惯性参数向量:
 
-假设测量噪声为零均值高斯白噪声且同分布。
+$$\theta_{body} = [m, mx, my, mz, I_{xx}, I_{xy}, I_{xz}, I_{yy}, I_{yz}, I_{zz}]^T$$
 
-$$ \hat{\beta}_{OLS} = (W^T W)^{-1} W^T \mathcal{T}_{meas} $$
+其中:
 
-**特性**: 计算最快，是基准算法。但对噪声分布敏感。
+- $m$: 质量
+- $(mx, my, mz)$: 一阶矩 $m \cdot c_{local}$
+- $I_{**}$: body 原点处惯量张量分量
 
-### 2.2 加权最小二乘法 (WLS)
-**参数**: `algorithm:="WLS"`
+本实现包含:
 
-解决不同关节噪声方差不同（异方差性）的问题。
-假设噪声协方差矩阵 $\Sigma = \text{diag}(\sigma_1^2, \dots, \sigma_N^2)$。
+- 8 个 body: link1-7 + hand (不含 link0 与手指)
+- 额外参数: armature(7), damping(7)
 
-$$ \hat{\beta}_{WLS} = (W^T \Sigma^{-1} W)^{-1} W^T \Sigma^{-1} \mathcal{T}_{meas} $$
+参数数量:
 
-**实现细节**:
-1. 先运行 OLS 得到残差。
-2. 统计每个关节的残差方差 $\hat{\sigma}_j^2$。
-3. 对观测矩阵 $W$ 和 $\tau$ 进行加权：$W_{row\_i} \leftarrow W_{row\_i} / \hat{\sigma}_j$。
-4. 再次求解 OLS。
+- 仅惯性: $8 \times 10 = 80$
+- 加 armature: $87$
+- 加 armature + damping: $94$ (Identification 默认)
 
-### 2.3 迭代重加权最小二乘法 (IRLS)
-**参数**: `algorithm:="IRLS"`
+### 3.2 MuJoCo 形式的线性回归
 
-用于增强鲁棒性，抵抗数据中的离群值 (Outliers)。
-采用 Huber 损失函数或 Tukey 权函数。
+MuJoCoPandaDynamics 中采用的动力学形式:
 
-**流程**:
-1. 初始求解 OLS 得到 $\beta^{(0)}$。
-2. 计算残差 $r = \mathcal{T}_{meas} - W \beta^{(k)}$。
-3. 更新权重矩阵 $S$：这取决于残差的大小，残差越大权重越小。
-   $$ w_i = \begin{cases} 1 & |r_i| \le \delta \\ \delta/|r_i| & |r_i| > \delta \end{cases} $$
-4. 求解加权最小二乘得到 $\beta^{(k+1)}$。
-5. 迭代直到收敛。
+$$\tau = M(q) \ddot{q} + C(q, \dot{q}) \dot{q} + G(q) - D \dot{q}$$
 
-### 2.4 总体最小二乘法 (TLS)
-**参数**: `algorithm:="TLS"`
+为了线性化，本项目写成:
 
-考虑到观测矩阵 $W$ (由于加速度计算引入的误差) 和 $\mathcal{T}_{meas}$ (力矩传感器) **同时存在噪声**的情况。
+$$\tau = Y(q, \dot{q}, \ddot{q}) \theta + A \ddot{q} - D \dot{q}$$
 
-**原理**:
-构造增广矩阵 $Z = [W, \mathcal{T}_{meas}]$，并进行奇异值分解 (SVD)：
-$$ Z = U \Sigma V^T $$
-取最小奇异值对应的右奇异向量 $v_{min}$，解析解为：
-$$ \hat{\beta}_{TLS} = - \frac{v_{min}(1:M)}{v_{min}(M+1)} $$
+其中:
 
----
+- $\theta$: 8 个 body 的惯性参数向量
+- $A = \mathrm{diag}(armature)$, $D = \mathrm{diag}(damping)$
+- $Y$ 由 `MuJoCoRegressor` 构造
 
-### 2.5 扩展卡尔曼滤波 (EKF)
-**参数**: `algorithm:="EKF"`
+### 3.3 单 body 回归块推导（`computeBodyRegressorBlock`）
 
-适用于在线辨识或参数随时间缓慢变化的情况。
-这里通过**递推最小二乘 (RLS)** 的形式实现，将参数 $\beta$ 视为状态，假设过程噪声 $Q \approx 0$。
+1) 运动学量（body 原点）:
 
-### 2.6 极大似然估计 (ML)
-**参数**: `algorithm:="ML"`
-**依赖**: `LevenbergMarquardt` Solver (Built-in)
+- $J_{world} \in \mathbb{R}^{6\times7}$, $\dot{J}$ 使用 $q \pm dt \cdot \dot{q}$ 数值微分 ($dt=1e-7$)
+- $a_{world} = J_v \ddot{q} + \dot{J}_v \dot{q}$
+- $\omega_{world} = J_\omega \dot{q}$
+- $\alpha_{world} = J_\omega \ddot{q} + \dot{J}_\omega \dot{q}$
 
-使用内置的 Levenberg-Marquardt 非线性求解器，直接最小化观测误差 $|| W\beta - \tau ||^2$。
-对于线性模型，其结果理论上与 OLS 一致，但展示了非线性优化框架的使用，可扩展用于非线性参数化模型。
+2) 转到 body 局部坐标系:
 
-### 2.7 闭环输出误差 (CLOE)
-**参数**: `algorithm:="CLOE"`
-**状态**: *实验性支持*
+- $R$: body 到 world 的旋转
+- $a_{local} = R^T a_{world}$
+- $\omega_{local} = R^T \omega_{world}$
+- $\alpha_{local} = R^T \alpha_{world}$
+- $g_{local} = R^T g_{world}$
+- $b_{local} = a_{local} - g_{local}$
 
-通过积分前向动力学方程 $\ddot{q} = M^{-1}(\tau - C\dot{q} - G)$ 得到位置 $\hat{q}$，并最小化位置误差 $|| q_{meas} - \hat{q} ||^2$。
-**注意**: 目前 C++ 实现中，由于 `RobotModel` 类设计的常数性，无法高效在优化循环中更新动力学模型参数，该算法目前仅作为接口存根 (Stub) 或返回 OLS 初始估计，完整功能待后续重构 `RobotModel` 后开启。
+3) 线性化关系:
 
----
+$$K = [\alpha]_{\times} + [\omega]_{\times}[\omega]_{\times}$$
+$$f_{local} = m \cdot b_{local} + K \cdot mc_{local}$$
+$$n_{local} = [mc_{local}]_{\times} b_{local} + I_{origin} \alpha_{local} + [\omega]_{\times} I_{origin} \omega_{local}$$
+$$\tau = J_{v,local}^T f_{local} + J_{\omega,local}^T n_{local}$$
 
-## 4. 运行示例
+4) 回归矩阵列（与实现一致）:
 
-```bash
-# 使用 OLS (默认)
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/exp1.csv algorithm:=OLS
+设 $\omega_{local}=(o_x,o_y,o_z)$, $\alpha_{local}=(a_x,a_y,a_z)$, $e_i$ 为标准基向量。
 
-# 使用 WRls (鲁棒性更好)
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/exp1.csv algorithm:=IRLS
+- $m$: $J_v^T b_{local}$
+- $mx,my,mz$: $J_v^T K e_i + J_\omega^T (e_i \times b_{local})$
+- $I_{xx}$: $J_\omega^T [a_x, o_x o_z, -o_x o_y]^T$
+- $I_{xy}$: $J_\omega^T [a_y - o_x o_z, a_x + o_y o_z, o_x^2 - o_y^2]^T$
+- $I_{xz}$: $J_\omega^T [a_z + o_x o_y, o_z^2 - o_x^2, a_x - o_y o_z]^T$
+- $I_{yy}$: $J_\omega^T [-o_y o_z, a_y, o_x o_y]^T$
+- $I_{yz}$: $J_\omega^T [o_y^2 - o_z^2, a_z - o_x o_y, a_y + o_x o_z]^T$
+- $I_{zz}$: $J_\omega^T [o_y o_z, -o_x o_z, a_z]^T$
 
-# 使用 EKF (在线递推风格)
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/exp1.csv algorithm:=EKF
+5) 关节项:
 
-# 使用 ML (非线性求解器)
-ros2 launch identification identification.launch.py data_file:=$(pwd)/data/exp1.csv algorithm:=ML
-```
+- armature: $Y(i, offset+i) = \ddot{q}(i)$
+- damping: $Y(i, offset+i) = -\dot{q}(i)$  (MuJoCo 阻尼为被动项)
+
+### 3.4 观测矩阵堆叠
+
+$$W = [Y(q_1); Y(q_2); \ldots; Y(q_K)]$$
+$$\tau_{meas} = [\tau_1; \tau_2; \ldots; \tau_K]$$
+
+注意: `MuJoCoRegressor::computeObservationMatrix` 接受 `Q/Qd/Qdd` 的列为样本，因此 `Identification::solve` 中传入 `q_valid.transpose()`。
+
+## 4. 目标函数与求解算法
+
+### 4.1 目标函数
+
+基本目标:
+
+$$\min_{\beta} \tfrac{1}{2} \| W \beta - \tau_{meas} \|^2$$
+
+正则化 OLS:
+
+$$\min \| W\beta - \tau \|^2 + \lambda \|\beta\|^2, \; \lambda=1e-6$$
+
+### 4.2 算法实现要点 (`algorithms.cpp`)
+
+- OLS: 正则化正规方程，LDLT 求解。
+- WLS: 先 OLS，按关节残差方差加权重求解。
+- IRLS: Huber 权重，$\sigma$ 由 MAD 估计，迭代至 `tol=1e-4`。
+- TLS: 对 $[W \; | \; \tau]$ 做 SVD，取最小奇异向量。
+- EKF/RLS: 逐行更新，$P=100I$, $R=0.1$。
+- ML: Levenberg-Marquardt，残差 $r=W\beta-\tau$, $J=W$。
+- CLOE: 需要动力学仿真与参数回写，目前退化为 OLS。
+
+## 5. 代码流程（主路径）
+
+### 5.1 数据加载
+
+文件: `src/identification/src/data_loader.cpp`
+
+- 自动检测是否包含 `qdd` 列
+- 构建 `ExperimentData` (q/qd/qdd/tau/time)
+
+### 5.2 预处理
+
+文件: `src/identification/src/identification.cpp`
+
+- 若 `qdd` 已存在且尺寸匹配，则直接使用
+- 否则使用中心差分:
+  $$\ddot{q}(i) = \frac{\dot{q}(i+1) - \dot{q}(i-1)}{time(i+1) - time(i-1)}$$
+- 首尾样本用邻近行填充
+
+### 5.3 构建 $W$ 与求解
+
+`Identification::solve`:
+
+- 过滤离群样本: $\max |\ddot{q}| < 10.0$
+- 按样本堆叠 $\tau_{meas}$
+- 用 `MuJoCoRegressor` 构建 $W$
+- `createAlgorithm` 根据字符串创建算法; 若返回 `nullptr` (CLOE) 则回退 OLS
+
+### 5.4 ROS2 入口流程 (`main.cpp`)
+
+- 参数读取: `data_file`, `algorithm`, `output_file`
+- MuJoCo 动力学验证: `MuJoCoPandaDynamics::computeInverseDynamics` 与记录 $\tau$ 对比
+- 训练/验证划分 (80%/20%)
+- 构建 $W_{val}$ 并评估列范数、条件数
+- 对每个算法:
+  - 训练集求解 $\beta$
+  - 验证集计算 Torque RMSE/Max Error
+- 可选: 保存 YAML 结果
+
+### 5.5 CLI 与测试工具
+
+- `mujoco_identify.cpp`: OLS 单次辨识，比较 Ground Truth 与扭矩 RMSE
+- `regressor_test.cpp`: 验证 $Y\theta$ 与 `MuJoCoPandaDynamics` 一致性
+- `model_comparison.cpp`, `dynamics_diagnostic.cpp`: 对比 DH 模型与 MuJoCo 模型差异
+
+## 6. 关键注意点与限制
+
+- 坐标系: 本辨识完全基于 MuJoCo Body-Local 坐标系，DH 模型与之不一致。
+- 阻尼符号: 回归中使用 $-\dot{q}$，需与 MuJoCo 定义保持一致。
+- 数值微分: $\dot{J}$ 与 $\ddot{q}$ 依赖差分，噪声会影响稳定性。
+- 可辨识性: $W$ 某些列可能接近 0；主程序已做列范数与条件数诊断。
+- 物理约束: 当前求解未加质量/惯量正定约束，可能出现非物理解。

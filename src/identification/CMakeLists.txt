@@ -45,7 +45,42 @@ target_link_libraries(identify_node Eigen3::Eigen)
 ament_target_dependencies(identify_node rclcpp)
 
 
-install(TARGETS identify_node
+# Dynamics Diagnostic Tool
+add_executable(dynamics_diagnostic
+  ${ROBOT_SOURCES}
+  src/dynamics_diagnostic.cpp
+  src/data_loader.cpp
+)
+target_link_libraries(dynamics_diagnostic Eigen3::Eigen)
+ament_target_dependencies(dynamics_diagnostic rclcpp)
+
+# Model Comparison Tool
+add_executable(model_comparison
+  ${ROBOT_SOURCES}
+  src/model_comparison.cpp
+)
+target_link_libraries(model_comparison Eigen3::Eigen)
+
+# Regressor Test Tool (验证 MuJoCoRegressor 正确性)
+add_executable(regressor_test
+  ${ROBOT_SOURCES}
+  src/regressor_test.cpp
+  src/data_loader.cpp
+)
+target_link_libraries(regressor_test Eigen3::Eigen)
+ament_target_dependencies(regressor_test rclcpp)
+
+# MuJoCo Identify Tool (使用 MuJoCoRegressor 进行参数辨识)
+add_executable(mujoco_identify
+  ${ROBOT_SOURCES}
+  src/mujoco_identify.cpp
+  src/data_loader.cpp
+  src/algorithms.cpp
+)
+target_link_libraries(mujoco_identify Eigen3::Eigen)
+ament_target_dependencies(mujoco_identify rclcpp)
+
+install(TARGETS identify_node dynamics_diagnostic model_comparison regressor_test mujoco_identify
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch
