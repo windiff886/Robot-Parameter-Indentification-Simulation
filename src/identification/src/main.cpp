@@ -1,8 +1,10 @@
 #include "identification/data_loader.hpp"
 #include "identification/identification.hpp"
+#include "mujoco_panda_dynamics.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "robot/franka_panda.hpp"
 #include "robot/regressor.hpp"
+#include "robot/robot_dynamics.hpp"
 #include <Eigen/Core>
 #include <chrono>
 #include <filesystem>
@@ -32,33 +34,38 @@ int main(int argc, char **argv) {
     algorithm_id = node->get_parameter("algorithm").as_int();
 
     // Map ID to string
-    switch (algorithm_id) {
-    case 1:
+    if (algorithm_id == 0) {
       algorithm = "OLS";
-      break;
-    case 2:
-      algorithm = "WLS";
-      break;
-    case 3:
-      algorithm = "IRLS";
-      break;
-    case 4:
-      algorithm = "TLS";
-      break;
-    case 5:
-      algorithm = "EKF";
-      break;
-    case 6:
-      algorithm = "ML";
-      break;
-    case 7:
-      algorithm = "CLOE";
-      break;
-    default:
-      RCLCPP_WARN(node->get_logger(),
-                  "Unknown algorithm ID: %d. Defaulting to OLS.", algorithm_id);
-      algorithm = "OLS";
-      break;
+    } else {
+      switch (algorithm_id) {
+      case 1:
+        algorithm = "OLS";
+        break;
+      case 2:
+        algorithm = "WLS";
+        break;
+      case 3:
+        algorithm = "IRLS";
+        break;
+      case 4:
+        algorithm = "TLS";
+        break;
+      case 5:
+        algorithm = "EKF";
+        break;
+      case 6:
+        algorithm = "ML";
+        break;
+      case 7:
+        algorithm = "CLOE";
+        break;
+      default:
+        RCLCPP_WARN(node->get_logger(),
+                    "Unknown algorithm ID: %d. Defaulting to OLS.",
+                    algorithm_id);
+        algorithm = "OLS";
+        break;
+      }
     }
 
   } catch (const rclcpp::exceptions::ParameterNotDeclaredException &e) {
@@ -89,7 +96,61 @@ int main(int argc, char **argv) {
                 "Preprocessing data (computing acceleration)...");
     identifier.preprocess(data);
 
-    // 4. Determine Algorithms to run
+    // ================================================================
+    // MuJoCo 动力学验证 - 手动实现
+    // ================================================================
+    {
+      std::cout << std::endl << std::string(70, '=') << std::endl;
+      std::cout << "  MUJOCO DYNAMICS VERIFICATION" << std::endl;
+      std::cout << std::string(70, '=') << std::endl;
+
+      robot::RobotDynamics rob_dyn(*robot::createFrankaPanda());
+
+      double sum_sq_error = 0.0;
+      double max_error = 0.0;
+      const std::size_t n_dof = 7;
+
+      for (std::size_t i = 0; i < data.n_samples; ++i) {
+        Eigen::VectorXd q_i = data.q.row(i).transpose();
+        Eigen::VectorXd qd_i = data.qd.row(i).transpose();
+        Eigen::VectorXd qdd_i = data.qdd.row(i).transpose();
+
+        // Compute ID using RobotDynamics
+        Eigen::MatrixXd M = rob_dyn.computeInertiaMatrix(q_i);
+        Eigen::MatrixXd C = rob_dyn.computeCoriolisMatrix(q_i, qd_i);
+        Eigen::VectorXd g_vec = rob_dyn.computeGravityVector(q_i);
+
+        // Base Dynamics
+        Eigen::VectorXd tau_mj = M * qdd_i + C * qd_i + g_vec;
+
+        // Add Armature (0.1) and Damping (1.0) to match MuJoCo XML
+        for (std::size_t k = 0; k < n_dof; ++k) {
+          tau_mj(k) += 0.1 * qdd_i(k);
+          tau_mj(k) += 1.0 * qd_i(k);
+        }
+
+        for (std::size_t j = 0; j < n_dof; ++j) {
+          double err = tau_mj(j) - data.tau(i, j);
+          sum_sq_error += err * err;
+          max_error = std::max(max_error, std::abs(err));
+        }
+      }
+
+      double rmse = std::sqrt(sum_sq_error / (data.n_samples * n_dof));
+
+      std::cout << std::fixed << std::setprecision(6);
+      std::cout << "  MuJoCo RMSE:      " << rmse << " Nm" << std::endl;
+      std::cout << "  Max Error:        " << max_error << " Nm" << std::endl;
+
+      if (rmse < 0.5) {
+        std::cout << "  [OK] Data valid!" << std::endl;
+      } else {
+        std::cout << "  [WARNING] Large error detected!" << std::endl;
+      }
+
+      std::cout << std::string(70, '=') << std::endl;
+    }
+
     std::vector<std::string> algorithms_to_run;
     if (algorithm_id == 0) {
       algorithms_to_run = {"OLS", "WLS", "IRLS", "TLS", "EKF", "ML", "CLOE"};
@@ -99,7 +160,22 @@ int main(int argc, char **argv) {
       algorithms_to_run.push_back(algorithm);
     }
 
-    bool include_friction = true;
+    // 动力学参数标志：包含 armature 和 damping 以匹配 MuJoCo 模型
+    // MuJoCo 默认: armature=0.1, damping=1.0
+    auto param_flags = robot::DynamicsParamFlags::ARMATURE |
+                       robot::DynamicsParamFlags::DAMPING;
+
+    RCLCPP_INFO(node->get_logger(),
+                "Dynamics model: ARMATURE=%s, DAMPING=%s, FRICTION=%s",
+                robot::hasFlag(param_flags, robot::DynamicsParamFlags::ARMATURE)
+                    ? "ON"
+                    : "OFF",
+                robot::hasFlag(param_flags, robot::DynamicsParamFlags::DAMPING)
+                    ? "ON"
+                    : "OFF",
+                robot::hasFlag(param_flags, robot::DynamicsParamFlags::FRICTION)
+                    ? "ON"
+                    : "OFF");
 
     // ================================================================
     // Cross-Validation: Split data into training (80%) and validation (20%)
@@ -141,15 +217,80 @@ int main(int argc, char **argv) {
     robot::Regressor eval_regressor(*eval_robot);
     Eigen::MatrixXd W_val = eval_regressor.computeObservationMatrix(
         val_data.q.transpose(), val_data.qd.transpose(),
-        val_data.qdd.transpose(), include_friction);
+        val_data.qdd.transpose(), param_flags);
 
-    // Build measured torque vector for VALIDATION set
+    // ================================================================
+    // 回归矩阵诊断：条件数和列范数分析
+    // ================================================================
+    {
+      // 计算每列的范数
+      Eigen::VectorXd col_norms(W_val.cols());
+      for (int j = 0; j < W_val.cols(); ++j) {
+        col_norms(j) = W_val.col(j).norm();
+      }
+
+      // 找出接近零的列（可能不可辨识的参数）
+      const double norm_threshold = 1e-6; // 放宽阈值
+      std::vector<int> zero_cols;
+      for (int j = 0; j < W_val.cols(); ++j) {
+        if (col_norms(j) < norm_threshold) {
+          zero_cols.push_back(j);
+        }
+      }
+
+      // 打印列范数统计
+      std::cout << "Regressor column norm stats: min=" << col_norms.minCoeff()
+                << ", max=" << col_norms.maxCoeff()
+                << ", mean=" << col_norms.mean() << std::endl;
+
+      if (!zero_cols.empty()) {
+        std::cout << "WARNING: " << zero_cols.size()
+                  << " parameters have near-zero regressor columns "
+                     "(unidentifiable):\n";
+        for (int idx : zero_cols) {
+          int link = idx / 10;
+          int param = idx % 10;
+          const char *param_names[] = {"m",   "mx",  "my",  "mz",  "Ixx",
+                                       "Ixy", "Ixz", "Iyy", "Iyz", "Izz"};
+          if (idx < 70) {
+            std::cout << "  Param " << idx << ": Link " << (link + 1) << " "
+                      << param_names[param] << "\n";
+          } else if (idx < 77) {
+            std::cout << "  Param " << idx << ": armature[" << (idx - 70)
+                      << "]\n";
+          } else {
+            std::cout << "  Param " << idx << ": damping[" << (idx - 77)
+                      << "]\n";
+          }
+        }
+      }
+
+      // 计算条件数（跳过大矩阵以节省时间）
+      if (W_val.rows() < 50000) {
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(W_val);
+        double cond = svd.singularValues()(0) /
+                      svd.singularValues()(svd.singularValues().size() - 1);
+        std::cout << "Regressor matrix condition number: " << std::scientific
+                  << cond << std::fixed << std::endl;
+        if (cond > 1e10) {
+          std::cout << "WARNING: Matrix is ill-conditioned! Results may be "
+                       "unstable.\n";
+        }
+      } else {
+        std::cout
+            << "Skipping condition number computation (matrix too large)\n";
+      }
+    }
+
+    // Build measured torque vector for VALIDATION set (early, for theory check)
     Eigen::VectorXd Tau_meas_val(val_data.n_samples * val_data.n_dof);
     for (std::size_t i = 0; i < val_data.n_samples; ++i) {
       for (std::size_t j = 0; j < val_data.n_dof; ++j) {
         Tau_meas_val(i * val_data.n_dof + j) = val_data.tau(i, j);
       }
     }
+
+    // NOTE: Tau_meas_val for validation evaluation
 
     struct BenchmarkResult {
       std::string name;
@@ -169,15 +310,23 @@ int main(int argc, char **argv) {
       res.name = algo_name;
 
       try {
-        res.beta = identifier.solve(train_data, algo_name, include_friction);
+        res.beta = identifier.solve(train_data, algo_name, param_flags);
 
         // Output short summary
+        // Output summary stats
+        RCLCPP_INFO(node->get_logger(), "Identified %s:", algo_name.c_str());
+        RCLCPP_INFO(node->get_logger(), "  Beta Norm: %f", res.beta.norm());
+        RCLCPP_INFO(node->get_logger(), "  Beta Max:  %f", res.beta.maxCoeff());
+        RCLCPP_INFO(node->get_logger(), "  Beta Min:  %f", res.beta.minCoeff());
+
         std::stringstream ss;
-        ss << res.beta.head((res.beta.size() > 5) ? 5 : res.beta.size())
-                  .transpose()
-           << "...";
-        RCLCPP_INFO(node->get_logger(), "Identified %s: [%s]",
-                    algo_name.c_str(), ss.str().c_str());
+        // Print first 20 params (spanning Link 1 and Link 2)
+        int print_count = (res.beta.size() > 20) ? 20 : res.beta.size();
+        for (int i = 0; i < print_count; ++i) {
+          ss << res.beta(i) << " ";
+        }
+        RCLCPP_INFO(node->get_logger(), "  First %d params: [ %s... ]",
+                    print_count, ss.str().c_str());
 
         // ============================================================
         // Cross-Validation Evaluation: Test on VALIDATION set

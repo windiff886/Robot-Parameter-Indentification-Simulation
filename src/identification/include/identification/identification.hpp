@@ -22,12 +22,33 @@ public:
    *
    * @param data Experiment data
    * @param algorithm_type "OLS", "WLS", "IRLS", "TLS"
-   * @param include_friction whether to identify friction parameters
+   * @param flags 动力学参数标志 (ARMATURE, DAMPING, FRICTION)
+   *              默认包含 ARMATURE 和 DAMPING 以匹配 MuJoCo 动力学模型
    * @return Identified parameters beta
+   *
+   * 参数向量 β 的结构:
+   *   [惯性参数 (10*N)] + [armature (N)] + [damping (N)] + [friction (2*N)]
+   *
+   * MuJoCo 动力学方程:
+   *   (M + diag(armature)) * q̈ + C*q̇ + G = τ + damping * q̇
+   *
+   * 整理为回归形式:
+   *   τ = M*q̈ + C*q̇ + G + armature*q̈ - damping*q̇
    */
   Eigen::VectorXd solve(const ExperimentData &data,
                         const std::string &algorithm_type = "OLS",
-                        bool include_friction = true);
+                        robot::DynamicsParamFlags flags =
+                            robot::DynamicsParamFlags::ARMATURE |
+                            robot::DynamicsParamFlags::DAMPING);
+
+  // 向后兼容的重载
+  Eigen::VectorXd solve(const ExperimentData &data,
+                        const std::string &algorithm_type,
+                        bool include_friction) {
+    return solve(data, algorithm_type,
+                 include_friction ? robot::DynamicsParamFlags::FRICTION
+                                  : robot::DynamicsParamFlags::NONE);
+  }
 
 private:
   std::unique_ptr<robot::RobotModel> model_;

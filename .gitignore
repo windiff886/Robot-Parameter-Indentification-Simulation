@@ -48,3 +48,4 @@ log/
 BIRDy/
 *_pycache__
 data/
+.claude/

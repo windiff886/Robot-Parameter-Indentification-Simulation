@@ -132,9 +132,20 @@ private:
   RobotKinematics kinematics_;
 
   /**
-   * @brief Convert link inertia to 6x6 spatial inertia matrix
+   * @brief Convert link inertia to 6x6 spatial inertia matrix in World Frame
+   * @param link_idx Link index
+   * @param R Rotation matrix from Link Frame to World Frame
    */
-  Eigen::Matrix<double, 6, 6> computeSpatialInertia(std::size_t link_idx) const;
+  Eigen::Matrix<double, 6, 6>
+  computeSpatialInertia(std::size_t link_idx, const Eigen::Matrix3d &R) const;
+
+  /**
+   * @brief Convert fixed body inertia to 6x6 spatial inertia matrix in World
+   * Frame
+   */
+  Eigen::Matrix<double, 6, 6>
+  computeSpatialInertiaForFixedBody(const FixedBodyAttachment &fb,
+                                    const Eigen::Matrix3d &R) const;
 };
 
 } // namespace robot

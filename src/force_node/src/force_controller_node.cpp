@@ -136,7 +136,7 @@ ForceControllerNode::ForceControllerNode(const rclcpp::NodeOptions &options)
 
   current_position_.resize(NUM_TOTAL_JOINTS, 0.0);
   current_velocity_.resize(NUM_TOTAL_JOINTS, 0.0);
-  last_torques_.resize(NUM_ARM_JOINTS + 1, 0.0);
+  current_effort_.resize(NUM_TOTAL_JOINTS, 0.0);
 
   RCLCPP_INFO(get_logger(), "Loaded config from %s",
               fs::absolute(config_path).string().c_str());
@@ -184,6 +184,9 @@ ForceControllerNode::ForceControllerNode(const rclcpp::NodeOptions &options)
                    ? "EXCITATION_TRAJECTORY"
                    : "HOLD_POSITION"),
               trajectory_duration_);
+
+  // 初始化时间基准
+  node_start_time_ = this->now();
 }
 
 void ForceControllerNode::init_excitation_trajectory() {
@@ -204,7 +207,7 @@ void ForceControllerNode::init_excitation_trajectory() {
 
   const int max_attempts = 200;
   bool valid_trajectory = false;
-  double amplitude = 0.05; // 初始幅度较小 (Reduced from 0.2)
+  double amplitude = 0.15; // Increased for better parameter excitation
 
   robot::RobotKinematics kinematics(*robot_model_);
 
@@ -216,14 +219,14 @@ void ForceControllerNode::init_excitation_trajectory() {
       valid_trajectory = true;
       RCLCPP_INFO(get_logger(),
                   "Found valid excitation trajectory after %d attempts "
-                  "(amplitude: %.2f)",
+                  "(amplitude: %.3f)",
                   attempt + 1, amplitude);
       break;
     } else {
-      // 如果一直找不到，可以尝试减小幅度?
-      // 这里策略暂定为：前20次尝试默认幅度，之后稍微减小
-      if (attempt > 20 && amplitude > 0.05) {
-        amplitude *= 0.9;
+      // Gradually reduce amplitude if we can't find a valid trajectory
+      // Start reducing after 20 attempts, minimum amplitude 0.01
+      if (attempt > 20 && amplitude > 0.01) {
+        amplitude *= 0.95;
       }
     }
   }
@@ -240,46 +243,6 @@ void ForceControllerNode::init_excitation_trajectory() {
   RCLCPP_INFO(get_logger(), "Generated Fourier excitation trajectory:");
   RCLCPP_INFO(get_logger(), "  Harmonics: %zu, Period: %.1f s", n_harmonics,
               period);
-
-  // 生成带时间戳的文件名
-  auto now = std::chrono::system_clock::now();
-  auto time_t_now = std::chrono::system_clock::to_time_t(now);
-  std::tm tm_now{};
-  localtime_r(&time_t_now, &tm_now);
-
-  std::ostringstream filename_ss;
-  filename_ss << "identification_data_"
-              << std::put_time(&tm_now, "%Y-%m-%d_%H-%M-%S") << ".csv";
-
-  // 创建 data 目录（如果不存在）
-  // 从包的安装目录推导工作空间根目录: install/force_node/share/force_node ->
-  // 工作空间根目录
-  fs::path data_dir;
-  try {
-    const auto share_dir =
-        ament_index_cpp::get_package_share_directory("force_node");
-    // share_dir = <workspace>/install/force_node/share/force_node
-    // 向上 4 级到达工作空间根目录
-    data_dir = fs::path(share_dir)
-                   .parent_path()
-                   .parent_path()
-                   .parent_path()
-                   .parent_path() /
-               "data";
-  } catch (const std::exception &) {
-    // 备用方案：使用当前工作目录
-    data_dir = fs::current_path() / "data";
-  }
-  if (!fs::exists(data_dir)) {
-    fs::create_directories(data_dir);
-    RCLCPP_INFO(get_logger(), "Created data directory: %s",
-                data_dir.string().c_str());
-  }
-
-  fs::path data_path = data_dir / filename_ss.str();
-
-  // 启动数据记录
-  start_data_recording(data_path.string());
 }
 
 bool ForceControllerNode::check_trajectory(
@@ -299,7 +262,29 @@ bool ForceControllerNode::check_trajectory(
       }
     }
 
-    // 2. MuJoCo Collision Check (High Fidelity)
+    // 2. Kinematic Ground Check (Safety Plane)
+    auto transforms = kinematics.computeAllTransforms(q);
+    for (const auto &T : transforms) {
+      if (T(2, 3) < SAFETY_PLANE_Z) { // Check Z height
+        return false;
+      }
+    }
+
+    // 3. Gripper Tip Check
+    // P_tip = P_ee + R_ee * [0, 0, L]^T
+    if (!transforms.empty()) {
+      const auto &T_ee = transforms.back();
+      Eigen::Vector3d p_ee = T_ee.block<3, 1>(0, 3);
+      Eigen::Matrix3d R_ee = T_ee.block<3, 3>(0, 0);
+      Eigen::Vector3d p_tip =
+          p_ee + R_ee * Eigen::Vector3d(0.0, 0.0, GRIPPER_LENGTH);
+
+      if (p_tip.z() < SAFETY_PLANE_Z) {
+        return false;
+      }
+    }
+
+    // 4. MuJoCo Collision Check (High Fidelity)
     if (collision_checker_.checkCollision(
             std::vector<double>(q.data(), q.data() + q.size()))) {
       RCLCPP_WARN(get_logger(), "Collision detected at t=%.2f", t);
@@ -308,72 +293,6 @@ bool ForceControllerNode::check_trajectory(
     }
   }
   return true;
-}
-
-void ForceControllerNode::start_data_recording(const std::string &filename) {
-  data_file_.open(filename);
-  if (data_file_.is_open()) {
-    // 写入 CSV 头
-    data_file_ << "time";
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-      data_file_ << ",q" << i + 1;
-    }
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-      data_file_ << ",qd" << i + 1;
-    }
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-      data_file_ << ",tau" << i + 1;
-    }
-    data_file_ << "\n";
-    recording_ = true;
-    RCLCPP_INFO(get_logger(), "Recording data to: %s", filename.c_str());
-  }
-}
-
-void ForceControllerNode::record_data_point(double t,
-                                            const std::vector<double> &q,
-                                            const std::vector<double> &qd,
-                                            const std::vector<double> &tau) {
-  if (!recording_ || !data_file_.is_open()) {
-    return;
-  }
-
-  if (q.size() < NUM_ARM_JOINTS || qd.size() < NUM_ARM_JOINTS ||
-      tau.size() < NUM_ARM_JOINTS) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "Skipping record: insufficient joint data.");
-    return;
-  }
-
-  const auto &limits = robot_model_->jointLimits();
-  if (limits.size() < NUM_ARM_JOINTS) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                         "Skipping record: joint limits unavailable.");
-    return;
-  }
-
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-    const double tau_max = limits[i].tau_max;
-    if (std::abs(tau[i]) > tau_max || q[i] < limits[i].q_min ||
-        q[i] > limits[i].q_max) {
-      RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 2000,
-          "Skipping record: torque/position exceeds joint limits.");
-      return;
-    }
-  }
-
-  data_file_ << std::fixed << std::setprecision(6) << t;
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-    data_file_ << "," << q[i];
-  }
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-    data_file_ << "," << qd[i];
-  }
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-    data_file_ << "," << tau[i];
-  }
-  data_file_ << "\n";
 }
 
 void ForceControllerNode::joint_state_callback(
@@ -392,6 +311,12 @@ void ForceControllerNode::joint_state_callback(
     }
   }
 
+  if (msg->effort.size() >= NUM_TOTAL_JOINTS) {
+    for (std::size_t i = 0; i < NUM_TOTAL_JOINTS; ++i) {
+      current_effort_[i] = msg->effort[i];
+    }
+  }
+
   state_received_ = true;
 }
 
@@ -400,16 +325,16 @@ void ForceControllerNode::control_loop() {
     return;
   }
 
-  std::vector<double> q, dq;
+  std::vector<double> q, dq, measured_tau;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     q = current_position_;
     dq = current_velocity_;
+    measured_tau = current_effort_;
   }
 
-  // 获取当前时间
-  static auto start_time = this->now();
-  const double current_time = (this->now() - start_time).seconds();
+  // 获取当前时间 (统一基准)
+  const double current_time = (this->now() - node_start_time_).seconds();
 
   // 启动轨迹
   if (!trajectory_started_ && mode_ == ControllerMode::EXCITATION_TRAJECTORY) {
@@ -420,7 +345,7 @@ void ForceControllerNode::control_loop() {
   }
 
   // Debug before compute_torque
-  auto torques = compute_torque(q, dq);
+  auto torques = compute_torque(q, dq, current_time);
 
   // Check for NaN
   for (double val : torques) {
@@ -429,28 +354,28 @@ void ForceControllerNode::control_loop() {
     }
   }
 
-  // 记录数据
+  // 力矩饱和检测与统计
   if (mode_ == ControllerMode::EXCITATION_TRAJECTORY && trajectory_started_ &&
       !trajectory_finished_) {
-    const double t_traj = current_time - trajectory_start_time_;
-    record_data_point(t_traj, q, dq, torques);
+    ++total_samples_;
+    const auto &limits = robot_model_->jointLimits();
+    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+      if (std::abs(torques[i]) >= limits[i].tau_max * 0.99) {
+        ++saturated_samples_;
+        break;
+      }
+    }
   }
 
-  last_torques_ = torques;
-
   auto msg = std_msgs::msg::Float64MultiArray();
-  msg.data = torques; // Copy instead of move
-  // RCLCPP_INFO(get_logger(), "Publishing torque (size %zu)...",
-  // msg.data.size());
+  msg.data = torques;
   torque_pub_->publish(msg);
-  // RCLCPP_INFO(get_logger(), "Torque published.");
-
-  // RCLCPP_INFO(get_logger(), "Loop finished (Mock).");
 }
 
 std::vector<double>
 ForceControllerNode::compute_torque(const std::vector<double> &q,
-                                    const std::vector<double> &dq) {
+                                    const std::vector<double> &dq,
+                                    double current_time) {
   std::vector<double> torques(8, 0.0);
 
   if (mode_ == ControllerMode::HOLD_POSITION || trajectory_finished_) {
@@ -461,8 +386,9 @@ ForceControllerNode::compute_torque(const std::vector<double> &q,
     }
   } else {
     // ========== 激励轨迹跟踪 ==========
-    static auto start_time = this->now();
-    const double current_time = (this->now() - start_time).seconds();
+    // static auto start_time = this->now(); // REMOVED: 使用统一传入的
+    // current_time const double current_time = (this->now() -
+    // start_time).seconds(); // REMOVED
     const double t_traj = current_time - trajectory_start_time_;
 
     // 检查轨迹是否完成
@@ -472,11 +398,16 @@ ForceControllerNode::compute_torque(const std::vector<double> &q,
         RCLCPP_INFO(
             get_logger(),
             "Excitation trajectory completed! Switching to HOLD_POSITION.");
-        RCLCPP_INFO(get_logger(), "Data saved successfully.");
 
-        if (data_file_.is_open()) {
-          data_file_.close();
-          recording_ = false;
+        // 输出力矩饱和统计
+        if (total_samples_ > 0) {
+          double saturation_ratio = 100.0 * saturated_samples_ / total_samples_;
+          RCLCPP_INFO(get_logger(), "=== TORQUE SATURATION STATISTICS ===");
+          RCLCPP_INFO(get_logger(), "  Total samples: %zu", total_samples_);
+          RCLCPP_INFO(get_logger(), "  Saturated samples: %zu",
+                      saturated_samples_);
+          RCLCPP_INFO(get_logger(), "  Saturation ratio: %.2f%%",
+                      saturation_ratio);
         }
       }
       // 回到定点控制
@@ -503,12 +434,11 @@ ForceControllerNode::compute_torque(const std::vector<double> &q,
     }
 
     // 每 2 秒打印一次状态
-    static double last_print_time = 0;
-    if (t_traj - last_print_time >= 2.0) {
+    if (t_traj - last_print_time_ >= 2.0) {
       RCLCPP_INFO(get_logger(), "Trajectory progress: %.1f / %.1f s (%.0f%%)",
                   t_traj, trajectory_duration_,
                   100.0 * t_traj / trajectory_duration_);
-      last_print_time = t_traj;
+      last_print_time_ = t_traj;
     }
   }
 

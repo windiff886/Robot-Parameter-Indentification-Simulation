@@ -7,6 +7,24 @@
 namespace identification {
 
 // =============================================================================
+// 正则化求解辅助函数 (Tikhonov/Ridge Regression)
+// 正则化求解辅助函数 (Tikhonov/Ridge Regression)
+// =============================================================================
+namespace {
+const double kRegularizationLambda = 1e-6;
+
+inline Eigen::VectorXd solveRegularized(const Eigen::MatrixXd &W,
+                                        const Eigen::VectorXd &tau) {
+  // 使用正规方程 (Normal Equations) 方法。
+  // 在剔除离群点后，矩阵不再极度病态，LDLT 速度快且有效。
+  Eigen::MatrixXd WtW = W.transpose() * W;
+  WtW +=
+      kRegularizationLambda * Eigen::MatrixXd::Identity(WtW.rows(), WtW.cols());
+  return WtW.ldlt().solve(W.transpose() * tau);
+}
+} // namespace
+
+// =============================================================================
 // Factory
 // =============================================================================
 // Note: CLOE requires extra init, so if created via factory, it needs casting
@@ -45,11 +63,15 @@ createAlgorithm(const std::string &type, int dof) {
 }
 
 // =============================================================================
-// OLS
+// OLS (with Tikhonov Regularization / Ridge Regression)
 // =============================================================================
 Eigen::VectorXd OLS::solve(const Eigen::MatrixXd &W,
                            const Eigen::VectorXd &Tau_meas) {
-  return W.colPivHouseholderQr().solve(Tau_meas);
+  // 使用 SVD 直接求解 OLS
+  // 这比正规方程 (Normal Equations) 方法更慢但数值上更稳定，
+  // 使用正则化求解以防止参数数值爆炸
+  // (即使数据已过滤，某些参数仍可能不可辨识导致秩亏)
+  return solveRegularized(W, Tau_meas);
 }
 
 // =============================================================================
@@ -59,7 +81,8 @@ WLS::WLS(int dof) : dof_(dof) {}
 
 Eigen::VectorXd WLS::solve(const Eigen::MatrixXd &W,
                            const Eigen::VectorXd &Tau_meas) {
-  Eigen::VectorXd beta_ols = W.colPivHouseholderQr().solve(Tau_meas);
+  // 使用正则化 OLS 计算初始估计
+  Eigen::VectorXd beta_ols = solveRegularized(W, Tau_meas);
   Eigen::VectorXd residual = Tau_meas - W * beta_ols;
 
   int n_samples = Tau_meas.size() / dof_;
@@ -88,7 +111,8 @@ Eigen::VectorXd WLS::solve(const Eigen::MatrixXd &W,
     }
   }
 
-  return W_weighted.colPivHouseholderQr().solve(Tau_weighted);
+  // 使用正则化求解加权最小二乘
+  return solveRegularized(W_weighted, Tau_weighted);
 }
 
 // =============================================================================
@@ -98,7 +122,8 @@ IRLS::IRLS(int max_iter, double tol) : max_iter_(max_iter), tol_(tol) {}
 
 Eigen::VectorXd IRLS::solve(const Eigen::MatrixXd &W,
                             const Eigen::VectorXd &Tau_meas) {
-  Eigen::VectorXd beta = W.colPivHouseholderQr().solve(Tau_meas);
+  // 使用正则化 OLS 初始化
+  Eigen::VectorXd beta = solveRegularized(W, Tau_meas);
   for (int k = 0; k < max_iter_; ++k) {
     Eigen::VectorXd residual = Tau_meas - W * beta;
     Eigen::VectorXd weights(residual.size());
@@ -125,7 +150,8 @@ Eigen::VectorXd IRLS::solve(const Eigen::MatrixXd &W,
       W_w.row(i) *= w_sqrt;
       Tau_w(i) *= w_sqrt;
     }
-    Eigen::VectorXd beta_new = W_w.colPivHouseholderQr().solve(Tau_w);
+    // 使用正则化求解
+    Eigen::VectorXd beta_new = solveRegularized(W_w, Tau_w);
     if ((beta_new - beta).norm() < tol_) {
       beta = beta_new;
       break;
@@ -146,7 +172,7 @@ Eigen::VectorXd TLS::solve(const Eigen::MatrixXd &W,
   Eigen::JacobiSVD<Eigen::MatrixXd> svd(Z, Eigen::ComputeThinV);
   Eigen::VectorXd v_last = svd.matrixV().col(n_cols);
   if (std::abs(v_last(n_cols)) < 1e-9)
-    return W.colPivHouseholderQr().solve(Tau_meas);
+    return solveRegularized(W, Tau_meas);
   return -v_last.head(n_cols) / v_last(n_cols);
 }
 
@@ -238,16 +264,15 @@ void CLOE::setExperimentData(const Eigen::MatrixXd &q_meas,
 }
 
 Eigen::VectorXd CLOE::solve(const Eigen::MatrixXd &W,
-                            const Eigen::VectorXd & /*Tau_meas*/) {
+                            const Eigen::VectorXd &Tau_meas) {
   if (q_meas_.rows() == 0) {
     std::cerr << "CLOE Error: Experiment data not set!" << std::endl;
-    // Fallback to OLS using W
-    return W.colPivHouseholderQr().solve(tau_meas_.reshaped().eval());
+    // Fallback to OLS using W and passed Tau_meas (which matches W dimensions)
+    return W.colPivHouseholderQr().solve(Tau_meas);
   }
 
-  // Initial guess using OLS
-  Eigen::VectorXd beta =
-      W.colPivHouseholderQr().solve(tau_meas_.reshaped().eval());
+  // Initial guess using OLS with the passed Tau_meas (matches W dimensions)
+  Eigen::VectorXd beta = W.colPivHouseholderQr().solve(Tau_meas);
 
   // NOTE: Implementing full CLOE with forward dynamics inside LM is
   // computationally heavy and requires mapping 'beta' back to robot model

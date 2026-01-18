@@ -2,7 +2,8 @@
  * @file robot_kinematics.hpp
  * @brief Forward kinematics computation for serial manipulators
  *
- * Computes homogeneous transformations and Jacobians using Modified DH convention.
+ * Computes homogeneous transformations and Jacobians using Modified DH
+ * convention.
  */
 
 #ifndef ROBOT__ROBOT_KINEMATICS_HPP_
@@ -12,17 +13,16 @@
 #include <Eigen/Dense>
 #include <vector>
 
-namespace robot
-{
+namespace robot {
 
 /**
  * @brief Forward kinematics computation class
  *
  * Uses Modified DH (Proximal/Craig) convention:
- *   T_i^{i-1} = Rot_x(alpha_{i-1}) * Trans_x(a_{i-1}) * Rot_z(theta_i) * Trans_z(d_i)
+ *   T_i^{i-1} = Rot_x(alpha_{i-1}) * Trans_x(a_{i-1}) * Rot_z(theta_i) *
+ * Trans_z(d_i)
  */
-class RobotKinematics
-{
+class RobotKinematics {
 public:
   using Matrix4d = Eigen::Matrix4d;
   using Matrix3d = Eigen::Matrix3d;
@@ -30,7 +30,7 @@ public:
   using VectorXd = Eigen::VectorXd;
   using MatrixXd = Eigen::MatrixXd;
 
-  explicit RobotKinematics(const RobotModel& model);
+  explicit RobotKinematics(const RobotModel &model);
 
   // ========== Forward Kinematics ==========
 
@@ -48,21 +48,22 @@ public:
    * @param q Joint angles vector
    * @return 4x4 homogeneous transformation matrix T_0^i
    */
-  Matrix4d computeForwardKinematics(std::size_t joint_idx, const VectorXd& q) const;
+  Matrix4d computeForwardKinematics(std::size_t joint_idx,
+                                    const VectorXd &q) const;
 
   /**
    * @brief Compute end-effector pose
    * @param q Joint angles vector
    * @return 4x4 homogeneous transformation matrix T_0^n
    */
-  Matrix4d computeEndEffectorPose(const VectorXd& q) const;
+  Matrix4d computeEndEffectorPose(const VectorXd &q) const;
 
   /**
    * @brief Compute all joint transforms at once
    * @param q Joint angles vector
    * @return Vector of 4x4 matrices [T_0^1, T_0^2, ..., T_0^n]
    */
-  std::vector<Matrix4d> computeAllTransforms(const VectorXd& q) const;
+  std::vector<Matrix4d> computeAllTransforms(const VectorXd &q) const;
 
   // ========== Jacobian Computation ==========
 
@@ -71,7 +72,7 @@ public:
    * @param q Joint angles vector
    * @return 6xN Jacobian matrix [J_v; J_omega]
    */
-  MatrixXd computeJacobian(const VectorXd& q) const;
+  MatrixXd computeJacobian(const VectorXd &q) const;
 
   /**
    * @brief Compute geometric Jacobian for a specific link's COM
@@ -79,7 +80,16 @@ public:
    * @param q Joint angles vector
    * @return 6xN Jacobian matrix for the link's center of mass
    */
-  MatrixXd computeLinkJacobian(std::size_t link_idx, const VectorXd& q) const;
+  MatrixXd computeLinkJacobian(std::size_t link_idx, const VectorXd &q) const;
+
+  /**
+   * @brief Compute geometric Jacobian for a specific link's frame origin
+   * @param link_idx Link index
+   * @param q Joint angles vector
+   * @return 6xN Jacobian matrix for the link frame origin
+   */
+  MatrixXd computeLinkOriginJacobian(std::size_t link_idx,
+                                     const VectorXd &q) const;
 
   /**
    * @brief Compute time derivative of Jacobian
@@ -87,24 +97,63 @@ public:
    * @param qd Joint velocities vector
    * @return 6xN Jacobian derivative matrix
    */
-  MatrixXd computeJacobianDerivative(const VectorXd& q, const VectorXd& qd) const;
+  MatrixXd computeJacobianDerivative(const VectorXd &q,
+                                     const VectorXd &qd) const;
+
+  /**
+   * @brief Compute time derivative of link-origin Jacobian
+   * @param link_idx Link index
+   * @param q Joint angles vector
+   * @param qd Joint velocities vector
+   * @return 6xN Jacobian derivative matrix for link frame origin
+   */
+  MatrixXd computeLinkOriginJacobianDerivative(std::size_t link_idx,
+                                               const VectorXd &q,
+                                               const VectorXd &qd) const;
+
+  /**
+   * @brief Compute time derivative of link COM Jacobian
+   * @param link_idx Link index
+   * @param q Joint angles vector
+   * @param qd Joint velocities vector
+   * @return 6xN Jacobian derivative matrix for link COM
+   */
+  MatrixXd computeLinkJacobianDerivative(std::size_t link_idx,
+                                         const VectorXd &q,
+                                         const VectorXd &qd) const;
+
+  /**
+   * @brief Compute geometric Jacobian for a fixed body's COM
+   * @param fixed_body_idx Index of the fixed body in model.fixedBodies()
+   * @param q Joint angles vector
+   * @return 6xN Jacobian matrix for the fixed body's center of mass
+   */
+  MatrixXd computeFixedBodyJacobian(std::size_t fixed_body_idx,
+                                    const VectorXd &q) const;
+
+  /**
+   * @brief Compute time derivative of fixed body Jacobian
+   */
+  MatrixXd computeFixedBodyJacobianDerivative(std::size_t fixed_body_idx,
+                                              const VectorXd &q,
+                                              const VectorXd &qd) const;
 
   // ========== Utility Functions ==========
 
   /**
    * @brief Extract rotation matrix from homogeneous transform
    */
-  static Matrix3d getRotation(const Matrix4d& T);
+  static Matrix3d getRotation(const Matrix4d &T);
 
   /**
    * @brief Extract position vector from homogeneous transform
    */
-  static Vector3d getPosition(const Matrix4d& T);
+  static Vector3d getPosition(const Matrix4d &T);
 
   /**
    * @brief Compute skew-symmetric matrix from vector
    */
-  static Matrix3d skew(const Vector3d& v);
+  static Matrix3d skew(const Vector3d &v);
 
   /**
    * @brief Get number of DOF
@@ -112,9 +161,9 @@ public:
   std::size_t numDOF() const { return model_.numDOF(); }
 
 private:
-  const RobotModel& model_;
+  const RobotModel &model_;
 };
 
-}  // namespace robot
+} // namespace robot
 
-#endif  // ROBOT__ROBOT_KINEMATICS_HPP_
+#endif // ROBOT__ROBOT_KINEMATICS_HPP_

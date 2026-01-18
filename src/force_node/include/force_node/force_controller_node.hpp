@@ -9,7 +9,6 @@
 #include "robot/mujoco_collision_checker.hpp"
 #include "trajectory/fourier_trajectory.hpp"
 
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -55,24 +54,13 @@ private:
    * @return 计算得到的力矩向量
    */
   std::vector<double> compute_torque(const std::vector<double> &q,
-                                     const std::vector<double> &dq);
+                                     const std::vector<double> &dq,
+                                     double current_time);
 
   /**
    * @brief 初始化激励轨迹
    */
   void init_excitation_trajectory();
-
-  /**
-   * @brief 开始记录数据
-   */
-  void start_data_recording(const std::string &filename);
-
-  /**
-   * @brief 记录当前数据点
-   */
-  void record_data_point(double t, const std::vector<double> &q,
-                         const std::vector<double> &qd,
-                         const std::vector<double> &tau);
 
   // ROS2 通信
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr
@@ -89,6 +77,7 @@ private:
   std::mutex state_mutex_;
   std::vector<double> current_position_;
   std::vector<double> current_velocity_;
+  std::vector<double> current_effort_;
   bool state_received_{false};
 
   // 控制模式
@@ -97,7 +86,7 @@ private:
   // 激励轨迹
   std::unique_ptr<trajectory::FourierTrajectory> trajectory_;
   double trajectory_start_time_{0.0};
-  double trajectory_duration_{10.0}; // 轨迹时长 (秒)
+  double trajectory_duration_{30.0}; // 轨迹时长 (秒)
   bool trajectory_started_{false};
   bool trajectory_finished_{false};
 
@@ -114,16 +103,21 @@ private:
   static constexpr double SAFETY_PLANE_Z = 0.15; // 地面以上 15cm
   static constexpr double GRIPPER_LENGTH = 0.20; // 夹爪长度 20cm
 
-  // 数据记录
-  std::ofstream data_file_;
-  bool recording_{false};
-  std::vector<double> last_torques_;
+  // 力矩饱和统计
+  std::size_t total_samples_{0};
+  std::size_t saturated_samples_{0};
 
   // 关节数量
   static constexpr std::size_t NUM_ARM_JOINTS = 7;
   static constexpr std::size_t NUM_FINGER_JOINTS = 2;
   static constexpr std::size_t NUM_TOTAL_JOINTS =
       NUM_ARM_JOINTS + NUM_FINGER_JOINTS;
+
+  // 时间基准
+  rclcpp::Time node_start_time_;
+
+  // 打印控制
+  double last_print_time_{0.0};
 };
 
 } // namespace force_node

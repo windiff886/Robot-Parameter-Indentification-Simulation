@@ -129,6 +129,27 @@ struct FrictionParameters {
 };
 
 // ============================================================================
+// Fixed Body Attachment
+// ============================================================================
+
+/**
+ * @brief Fixed body attached to a parent link
+ *
+ * Represents a body that is rigidly attached to a parent link (e.g., Hand
+ * attached to Link 7). The fixed body does not add DOF but contributes to
+ * the overall dynamics through its inertial parameters.
+ */
+struct FixedBodyAttachment {
+  std::size_t parent_link_idx{0}; ///< Index of parent link (0-based)
+  std::array<double, 3> position{
+      {0.0, 0.0, 0.0}}; ///< Position offset from parent link origin
+  std::array<double, 4> quaternion{
+      {1.0, 0.0, 0.0, 0.0}}; ///< Orientation (w, x, y, z)
+  LinkParameters params;     ///< Inertial parameters (mass, COM, inertia)
+  std::string name;          ///< Name of the fixed body
+};
+
+// ============================================================================
 // Robot Model Base Class
 // ============================================================================
 
@@ -181,6 +202,20 @@ public:
     return joint_limits_.at(joint_idx);
   }
 
+  /**
+   * @brief Get all fixed body attachments
+   */
+  const std::vector<FixedBodyAttachment> &fixedBodies() const {
+    return fixed_bodies_;
+  }
+
+  /**
+   * @brief Get total number of bodies (links + fixed bodies)
+   */
+  std::size_t numBodies() const {
+    return link_params_.size() + fixed_bodies_.size();
+  }
+
 protected:
   std::string name_;
   std::size_t num_dof_{0};
@@ -189,6 +224,8 @@ protected:
   std::vector<LinkParameters> link_params_;
   std::vector<JointLimits> joint_limits_;
   std::vector<FrictionParameters> friction_params_;
+  std::vector<FixedBodyAttachment>
+      fixed_bodies_; // Fixed bodies attached to links
   ControlParameters control_params_;
 
   std::array<double, 3> gravity_{{0.0, 0.0, 9.81}};

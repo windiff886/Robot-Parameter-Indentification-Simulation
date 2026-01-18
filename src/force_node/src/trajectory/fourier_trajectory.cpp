@@ -118,31 +118,59 @@ void FourierTrajectory::setRandomCoefficients(double amplitude) {
 void FourierTrajectory::applyInitialConditionConstraints() {
   const double omega = params_.omega;
 
-  // At t=0:
-  // q(0) = q0 - Σ B_ij/(ωj) = q0  => Σ B_ij/(ωj) = 0
-  // q̇(0) = Σ A_ij = 0
-  // q̈(0) = ω * Σ B_ij * j = 0
+  // At t=0, we need to satisfy:
+  // 1. q̇(0) = Σ A_ij = 0
+  // 2. q(0) = q0, which requires: Σ B_ij/(ω*(j+1)) = 0
+  // 3. q̈(0) = 0, which requires: Σ B_ij * (j+1) = 0
+  //
+  // Constraints 2 and 3 require TWO degrees of freedom (B_i0 and B_i1)
+  // to satisfy two independent linear equations.
 
   for (std::size_t i = 0; i < params_.n_dof; ++i) {
-    // Constraint: Σ A_ij = 0 for q̇(0) = 0
-    // Simple approach: adjust first coefficient
+    // Constraint 1: Σ A_ij = 0 for q̇(0) = 0
+    // Use A(i,0) to cancel sum of A(i,1..n-1)
     double sum_A = 0;
     for (std::size_t j = 1; j < params_.n_harmonics; ++j) {
       sum_A += params_.A(i, j);
     }
     params_.A(i, 0) = -sum_A;
 
-    // Constraint: Σ B_ij * j = 0 for q̈(0) = 0
-    // And: Σ B_ij/(ωj) = 0 for q(0) = q0
-    // Simple approach: set B_ij to satisfy constraints
-    double sum_B_j = 0;
-    double sum_B_inv_j = 0;
-    for (std::size_t j = 1; j < params_.n_harmonics; ++j) {
-      sum_B_j += params_.B(i, j) * static_cast<double>(j + 1);
-      sum_B_inv_j += params_.B(i, j) / (omega * static_cast<double>(j + 1));
+    // For constraints 2 and 3, we need to solve a 2x2 linear system
+    // using B(i,0) and B(i,1) as free variables.
+    //
+    // Let S1 = Σ_{j>=2} B_ij/(ω*(j+1))  (contribution from fixed B coefficients)
+    // Let S2 = Σ_{j>=2} B_ij * (j+1)     (contribution from fixed B coefficients)
+    //
+    // System:
+    //   B0/(ω*1) + B1/(ω*2) = -S1   => B0 + B1/2 = -S1*ω   ...(eq1)
+    //   B0*1 + B1*2 = -S2                                   ...(eq2)
+    //
+    // Solving:
+    //   (eq2) - (eq1): 1.5*B1 = -S2 + S1*ω
+    //   B1 = (S1*ω - S2) * (2/3)
+    //   B0 = -S1*ω - B1/2
+
+    if (params_.n_harmonics >= 2) {
+      double S1 = 0.0; // Σ B_ij / (ω*(j+1)) for j >= 2
+      double S2 = 0.0; // Σ B_ij * (j+1) for j >= 2
+
+      for (std::size_t j = 2; j < params_.n_harmonics; ++j) {
+        const double j1 = static_cast<double>(j + 1);
+        S1 += params_.B(i, j) / (omega * j1);
+        S2 += params_.B(i, j) * j1;
+      }
+
+      // Solve 2x2 system
+      const double B1 = (S1 * omega - S2) * (2.0 / 3.0);
+      const double B0 = -S1 * omega - B1 / 2.0;
+
+      params_.B(i, 0) = B0;
+      params_.B(i, 1) = B1;
+    } else {
+      // Only one harmonic: can only satisfy one constraint
+      // Prioritize q̈(0) = 0
+      params_.B(i, 0) = 0.0;
     }
-    // Adjust B(i, 0) to make sum_B_j = 0
-    params_.B(i, 0) = -sum_B_j;
   }
 }
 

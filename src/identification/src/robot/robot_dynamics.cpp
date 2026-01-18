@@ -16,22 +16,28 @@ RobotDynamics::RobotDynamics(const RobotModel &model)
 // ============================================================================
 
 Eigen::Matrix<double, 6, 6>
-RobotDynamics::computeSpatialInertia(std::size_t link_idx) const {
+RobotDynamics::computeSpatialInertia(std::size_t link_idx,
+                                     const Eigen::Matrix3d &R) const {
   const auto &link = model_.link(link_idx);
 
   const double m = link.mass;
-  const Vector3d c(link.com[0], link.com[1], link.com[2]);
+  // COM in local frame converted to world frame vector
+  const Vector3d c_local(link.com[0], link.com[1], link.com[2]);
+  const Vector3d c_world = R * c_local;
 
-  // Inertia tensor at COM
-  Matrix3d I_com;
-  I_com << link.inertia.Ixx, link.inertia.Ixy, link.inertia.Ixz,
+  // Inertia tensor at COM (Local Frame)
+  Matrix3d I_com_local;
+  I_com_local << link.inertia.Ixx, link.inertia.Ixy, link.inertia.Ixz,
       link.inertia.Ixy, link.inertia.Iyy, link.inertia.Iyz, link.inertia.Ixz,
       link.inertia.Iyz, link.inertia.Izz;
 
-  // Transform inertia to link origin using parallel axis theorem
-  // I_origin = I_com + m * (c^T c * I - c * c^T)
-  Matrix3d c_skew = RobotKinematics::skew(c);
-  Matrix3d I_origin = I_com - m * c_skew * c_skew;
+  // Rotate inertia to World Frame
+  Matrix3d I_com_world = R * I_com_local * R.transpose();
+
+  // Transform inertia to link origin using parallel axis theorem (in World
+  // Frame)
+  Matrix3d c_skew = RobotKinematics::skew(c_world);
+  Matrix3d I_origin_world = I_com_world - m * c_skew * c_skew;
 
   // 6x6 spatial inertia matrix
   Eigen::Matrix<double, 6, 6> M_spatial;
@@ -39,7 +45,39 @@ RobotDynamics::computeSpatialInertia(std::size_t link_idx) const {
   M_spatial.block<3, 3>(0, 0) = m * Matrix3d::Identity();
   M_spatial.block<3, 3>(0, 3) = m * c_skew.transpose();
   M_spatial.block<3, 3>(3, 0) = m * c_skew;
-  M_spatial.block<3, 3>(3, 3) = I_origin;
+  M_spatial.block<3, 3>(3, 3) = I_origin_world;
+
+  return M_spatial;
+}
+
+Eigen::Matrix<double, 6, 6> RobotDynamics::computeSpatialInertiaForFixedBody(
+    const FixedBodyAttachment &fb, const Eigen::Matrix3d &R) const {
+  const double m = fb.params.mass;
+  // COM in local frame converted to world frame
+  const Vector3d c_local(fb.params.com[0], fb.params.com[1], fb.params.com[2]);
+  const Vector3d c_world = R * c_local;
+
+  // Inertia tensor at COM (Local Frame)
+  Matrix3d I_com_local;
+  I_com_local << fb.params.inertia.Ixx, fb.params.inertia.Ixy,
+      fb.params.inertia.Ixz, fb.params.inertia.Ixy, fb.params.inertia.Iyy,
+      fb.params.inertia.Iyz, fb.params.inertia.Ixz, fb.params.inertia.Iyz,
+      fb.params.inertia.Izz;
+
+  // Rotate to World Frame
+  Matrix3d I_com_world = R * I_com_local * R.transpose();
+
+  // Transform inertia to fixed body origin using parallel axis theorem
+  Matrix3d c_skew = RobotKinematics::skew(c_world);
+  Matrix3d I_origin_world = I_com_world - m * c_skew * c_skew;
+
+  // 6x6 spatial inertia matrix
+  Eigen::Matrix<double, 6, 6> M_spatial;
+  M_spatial.setZero();
+  M_spatial.block<3, 3>(0, 0) = m * Matrix3d::Identity();
+  M_spatial.block<3, 3>(0, 3) = m * c_skew.transpose();
+  M_spatial.block<3, 3>(3, 0) = m * c_skew;
+  M_spatial.block<3, 3>(3, 3) = I_origin_world;
 
   return M_spatial;
 }
@@ -53,16 +91,49 @@ RobotDynamics::computeInertiaMatrix(const VectorXd &q) const {
   const std::size_t n = numDOF();
   MatrixXd M = MatrixXd::Zero(n, n);
 
+  // Precompute all link transforms to get orientations
+  auto transforms = kinematics_.computeAllTransforms(q);
+
   // M = sum_{i=1}^{n} J_i^T * M_i * J_i
   for (std::size_t i = 0; i < n; ++i) {
     // Get Jacobian for link i's COM
     MatrixXd J_i = kinematics_.computeLinkJacobian(i, q);
 
-    // Get spatial inertia for link i+1 (skip base link)
-    auto M_i = computeSpatialInertia(i + 1);
+    // Get rotation matrix for link i+1 (transforms[i])
+    Matrix3d R = RobotKinematics::getRotation(transforms[i]);
+
+    // Get spatial inertia for link i+1 (skip base link) transformed to World
+    // Frame
+    auto M_i = computeSpatialInertia(i + 1, R);
 
     // Add contribution to inertia matrix
     M += J_i.transpose() * M_i * J_i;
+  }
+
+  // Add contributions from fixed bodies
+  const auto &fixed_bodies = model_.fixedBodies();
+  for (std::size_t fb_idx = 0; fb_idx < fixed_bodies.size(); ++fb_idx) {
+    const auto &fb = fixed_bodies[fb_idx];
+
+    // Compute Jacobian for fixed body's COM
+    MatrixXd J_fb = kinematics_.computeFixedBodyJacobian(fb_idx, q);
+
+    // Compute rotation R_fb = R_parent * R_local
+    std::size_t parent_idx = fb.parent_link_idx;
+    Eigen::Matrix3d R_parent = Eigen::Matrix3d::Identity();
+    if (parent_idx > 0 && parent_idx - 1 < transforms.size()) {
+      R_parent = RobotKinematics::getRotation(transforms[parent_idx - 1]);
+    }
+
+    Eigen::Quaterniond quat(fb.quaternion[0], fb.quaternion[1],
+                            fb.quaternion[2], fb.quaternion[3]);
+    Matrix3d R_fb = R_parent * quat.toRotationMatrix();
+
+    // Compute spatial inertia for fixed body
+    auto M_fb = computeSpatialInertiaForFixedBody(fb, R_fb);
+
+    // Add contribution
+    M += J_fb.transpose() * M_fb * J_fb;
   }
 
   // Ensure symmetry
@@ -137,6 +208,19 @@ RobotDynamics::computeGravityVector(const VectorXd &q) const {
 
     // Add gravity contribution
     G -= J_v.transpose() * (link.mass * g);
+  }
+
+  // Add contributions from fixed bodies
+  const auto &fixed_bodies = model_.fixedBodies();
+  for (std::size_t fb_idx = 0; fb_idx < fixed_bodies.size(); ++fb_idx) {
+    const auto &fb = fixed_bodies[fb_idx];
+
+    // Get linear Jacobian for fixed body's COM
+    MatrixXd J_fb = kinematics_.computeFixedBodyJacobian(fb_idx, q);
+    Eigen::Matrix<double, 3, Eigen::Dynamic> J_v_fb = J_fb.topRows(3);
+
+    // Add gravity contribution
+    G -= J_v_fb.transpose() * (fb.params.mass * g);
   }
 
   return G;

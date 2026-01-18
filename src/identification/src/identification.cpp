@@ -8,8 +8,21 @@ Identification::Identification(std::unique_ptr<robot::RobotModel> model)
 }
 
 void Identification::preprocess(ExperimentData &data) {
-  // 1. Numerical Differentiation for qdd
+  // Check if qdd was already loaded from file (physics engine data)
+  if (data.qdd.rows() == static_cast<Eigen::Index>(data.n_samples) &&
+      data.qdd.cols() == static_cast<Eigen::Index>(data.n_dof)) {
+    std::cout << "Preprocessing: using qdd from physics engine (already loaded)"
+              << std::endl;
+    std::cout << "DEBUG: qdd max abs: " << data.qdd.cwiseAbs().maxCoeff()
+              << std::endl;
+    std::cout << "DEBUG: qdd norm: " << data.qdd.norm() << std::endl;
+    return;
+  }
+
+  // Fallback: Numerical Differentiation for qdd
   // Using central difference: qdd[i] = (qd[i+1] - qd[i-1]) / (2*dt)
+  std::cout << "Preprocessing: computing qdd via numerical differentiation..."
+            << std::endl;
 
   data.qdd.resize(data.n_samples, data.n_dof);
 
@@ -29,30 +42,67 @@ void Identification::preprocess(ExperimentData &data) {
   data.qdd.row(data.n_samples - 1) = data.qdd.row(data.n_samples - 2);
 
   std::cout << "Preprocessing complete: computed accelerations." << std::endl;
+  std::cout << "DEBUG: qdd max abs: " << data.qdd.cwiseAbs().maxCoeff()
+            << std::endl;
+  std::cout << "DEBUG: qdd norm: " << data.qdd.norm() << std::endl;
 }
 
 Eigen::VectorXd Identification::solve(const ExperimentData &data,
                                       const std::string &algorithm_type,
-                                      bool include_friction) {
+                                      robot::DynamicsParamFlags flags) {
   if (data.qdd.rows() == 0) {
     throw std::runtime_error("Experiment data not preprocessed: qdd is empty");
   }
 
   std::cout << "Building observation matrix W..." << std::endl;
-  // W: (N*Samples) x (M_params)
-  Eigen::MatrixXd W = regressor_->computeObservationMatrix(
-      data.q.transpose(), data.qd.transpose(), data.qdd.transpose(),
-      include_friction);
 
-  std::cout << "W size: " << W.rows() << " x " << W.cols() << std::endl;
+  // Filter out samples with excessive acceleration (outliers)
+  // Threshold: 10.0 rad/s^2 (Standard is ~0.001 for this trajectory)
+  const double qdd_threshold = 10.0;
+  std::vector<std::size_t> valid_indices;
+  valid_indices.reserve(data.n_samples);
 
-  // Y_meas (tau vector): Stack all tau measurements
-  Eigen::VectorXd Tau_meas(data.n_samples * data.n_dof);
   for (std::size_t i = 0; i < data.n_samples; ++i) {
-    for (std::size_t j = 0; j < data.n_dof; ++j) {
-      Tau_meas(i * data.n_dof + j) = data.tau(i, j);
+    if (data.qdd.row(i).cwiseAbs().maxCoeff() < qdd_threshold) {
+      valid_indices.push_back(i);
     }
   }
+
+  if (valid_indices.empty()) {
+    throw std::runtime_error(
+        "No valid samples remaining after filtering outliers!");
+  }
+
+  std::cout << "Filtered " << (data.n_samples - valid_indices.size())
+            << " outlier samples. " << valid_indices.size()
+            << " valid samples remain." << std::endl;
+
+  // Build filtered W and Tau
+  // Cannot verify regressor_ directly via tool, assuming API matches.
+  // Regressor::computeObservationMatrix expects full matrices.
+  // We need to construct subset matrices.
+
+  Eigen::MatrixXd q_valid(valid_indices.size(), data.n_dof);
+  Eigen::MatrixXd qd_valid(valid_indices.size(), data.n_dof);
+  Eigen::MatrixXd qdd_valid(valid_indices.size(), data.n_dof);
+  Eigen::VectorXd Tau_meas(valid_indices.size() * data.n_dof);
+
+  for (std::size_t k = 0; k < valid_indices.size(); ++k) {
+    std::size_t idx = valid_indices[k];
+    q_valid.row(k) = data.q.row(idx);
+    qd_valid.row(k) = data.qd.row(idx);
+    qdd_valid.row(k) = data.qdd.row(idx);
+    for (std::size_t j = 0; j < data.n_dof; ++j) {
+      Tau_meas(k * data.n_dof + j) = data.tau(idx, j);
+    }
+  }
+
+  // W: (N*Samples) x (M_params)
+  Eigen::MatrixXd W = regressor_->computeObservationMatrix(
+      q_valid.transpose(), qd_valid.transpose(), qdd_valid.transpose(),
+      flags);
+
+  std::cout << "W size: " << W.rows() << " x " << W.cols() << std::endl;
 
   int dof = data.n_dof;
 
