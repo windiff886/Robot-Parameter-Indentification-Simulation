@@ -1,0 +1,175 @@
+<mujoco model="piper">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <option integrator="implicitfast" timestep="0.001"/>
+
+  <default>
+    <default class="piper">
+      <material specular="0.5" shininess="0.25"/>
+      <joint armature="0.1" damping="1" axis="0 0 1"/>
+      <default class="gripper">
+        <joint type="slide"/>
+      </default>
+
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom type="mesh" group="3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <!-- 材质定义 -->
+    <material class="piper" name="white" rgba="1 1 1 1"/>
+    <material class="piper" name="body_color" rgba="0.792157 0.819608 0.933333 1"/>
+    <material class="piper" name="end_effector_color" rgba="0.898039 0.917647 0.929412 1"/>
+
+    <!-- Mesh 文件（同时用于视觉和碰撞） -->
+    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="link1" file="link1.STL"/>
+    <mesh name="link2" file="link2.STL"/>
+    <mesh name="link3" file="link3.STL"/>
+    <mesh name="link4" file="link4.STL"/>
+    <mesh name="link5" file="link5.STL"/>
+    <mesh name="link6" file="link6.STL"/>
+    <mesh name="gripper_base" file="gripper_base.STL"/>
+    <mesh name="link7" file="link7.STL"/>
+    <mesh name="link8" file="link8.STL"/>
+  </asset>
+
+  <worldbody>
+    <light name="top" pos="0 0 2" mode="trackcom"/>
+    <body name="base_link" childclass="piper">
+      <!-- 基座：固定在世界坐标系 -->
+      <inertial pos="-0.00473641 2.56829e-05 0.041452" mass="1.02"
+        fullinertia="0.00267433 0.00282612 0.00089624 -0.00000073 -0.00017389 0.0000004"/>
+      <geom mesh="base_link" material="body_color" class="visual"/>
+      <geom mesh="base_link" class="collision"/>
+
+      <body name="link1" pos="0 0 0.123">
+        <!-- 关节1：绕 Z 轴旋转 -->
+        <inertial pos="0.000121505 0.000104632 -0.00438597"
+          quat="0.682111 0.730899 0.0143111 -0.0175062" mass="0.71"
+          diaginertia="0.000489262 0.000439887 0.000404551"/>
+        <joint name="joint1" range="-2.618 2.618"/>
+        <geom mesh="link1" material="body_color" class="visual"/>
+        <geom mesh="link1" class="collision"/>
+
+        <body name="link2" pos="0 0 0" quat="0.0356735 -0.0356786 -0.706207 -0.706205">
+          <!-- 关节2：绕 Z 轴旋转 -->
+          <inertial pos="0.198666 -0.0109269 0.00142122"
+            quat="0.510131 0.475585 0.525075 0.48773" mass="1.17"
+            diaginertia="0.0679032 0.067745 0.00111966"/>
+          <joint name="joint2" range="0 3.14"/>
+          <geom mesh="link2" material="body_color" class="visual"/>
+          <geom mesh="link2" class="collision"/>
+
+          <body name="link3" pos="0.28503 0 0" quat="0.637536 0 0 -0.77042">
+            <!-- 关节3：绕 Z 轴旋转 -->
+            <inertial pos="-0.0202738 -0.133915 -0.000458683"
+              quat="0.706282 0.705111 0.0532202 0.0339395" mass="0.5"
+              diaginertia="0.0138227 0.0138032 0.000244685"/>
+            <joint name="joint3" range="-2.967 0"/>
+            <geom mesh="link3" material="body_color" class="visual"/>
+            <geom mesh="link3" class="collision"/>
+
+            <body name="link4" pos="-0.021984 -0.25075 0" quat="0.707105 0.707108 0 0">
+              <!-- 关节4：绕 Z 轴旋转 -->
+              <inertial pos="-9.66636e-05 0.000876064 -0.00496881"
+                quat="0.714689 -0.0948484 0.0635223 0.690064" mass="0.38"
+                diaginertia="0.000191586 0.000185052 0.000152863"/>
+              <joint name="joint4" range="-1.745 1.745"/>
+              <geom mesh="link4" material="body_color" class="visual"/>
+              <geom mesh="link4" class="collision"/>
+
+              <body name="link5" pos="0 0 0" quat="0.707105 -0.707108 0 0">
+                <!-- 关节5：绕 Z 轴旋转 -->
+                <inertial pos="-4.10554e-05 -0.0566487 -0.00372058"
+                  quat="0.709589 0.704614 0.00134613 -0.00132656" mass="0.383"
+                  diaginertia="0.00166169 0.00164328 0.000185028"/>
+                <joint name="joint5" range="-1.22 1.22"/>
+                <geom mesh="link5" material="body_color" class="visual"/>
+                <geom mesh="link5" class="collision"/>
+
+                <body name="link6" pos="8.8259e-05 -0.091 0" quat="0.707105 0.707108 0 0">
+                  <!-- 关节6：绕 Z 轴旋转 -->
+                  <inertial pos="-0.000182345 7.94104e-05 0.0316214"
+                    quat="0.999977 6.30554e-05 0.00678017 0.000789386" mass="0.456991"
+                    diaginertia="0.000938039 0.000723068 0.000395388"/>
+                  <joint name="joint6" range="-2.0944 2.0944"/>
+                  <geom mesh="link6" material="end_effector_color" class="visual"/>
+                  <geom mesh="link6" class="collision"/>
+
+                  <!-- 夹爪基座（固定连接到 link6） -->
+                  <geom mesh="gripper_base" material="body_color" class="visual"/>
+                  <geom mesh="gripper_base" class="collision"/>
+
+                  <!-- 左手指 -->
+                  <body name="left_finger" pos="0 0 0.1358" quat="0.707105 0.707108 0 0">
+                    <inertial pos="0.000651232 -0.049193 0.00972259"
+                      quat="0.477798 0.572974 -0.518028 0.418398" mass="0.025"
+                      diaginertia="7.74531e-05 7.36783e-05 5.0886e-06"/>
+                    <joint name="joint7" class="gripper" axis="0 0 1" range="0 0.035"/>
+                    <geom mesh="link7" material="body_color" class="visual"/>
+                    <geom mesh="link7" class="collision"/>
+                  </body>
+
+                  <!-- 右手指 -->
+                  <body name="right_finger" pos="0 0 0.1358" quat="-2.59734e-06 -2.59735e-06 -0.707108 -0.707105">
+                    <inertial pos="0.000651232 -0.049193 0.00972259"
+                      quat="0.477798 0.572974 -0.518028 0.418398" mass="0.025"
+                      diaginertia="7.74531e-05 7.36783e-05 5.0886e-06"/>
+                    <joint name="joint8" class="gripper" axis="0 0 -1" range="-0.035 0"/>
+                    <geom mesh="link8" material="body_color" class="visual"/>
+                    <geom mesh="link8" class="collision"/>
+                  </body>
+
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- 夹爪同步：通过 tendon 将两个手指绑定 -->
+  <tendon>
+    <fixed name="split">
+      <joint joint="joint7" coef="0.5"/>
+      <joint joint="joint8" coef="0.5"/>
+    </fixed>
+  </tendon>
+
+  <!-- 夹爪等式约束：确保两个手指同步运动 -->
+  <equality>
+    <joint joint1="joint7" joint2="joint8" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+  </equality>
+
+  <!-- 纯力矩控制模式：ctrl 直接作为关节力矩输入 (τ = ctrl) -->
+  <actuator>
+    <!-- 关节 1-3: 大关节，力矩范围 ±100 Nm -->
+    <motor name="actuator1" joint="joint1" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator2" joint="joint2" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator3" joint="joint3" ctrlrange="-100 100" ctrllimited="true"/>
+    <!-- 关节 4-6: 小关节，力矩范围 ±100 Nm -->
+    <motor name="actuator4" joint="joint4" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator5" joint="joint5" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator6" joint="joint6" ctrlrange="-100 100" ctrllimited="true"/>
+    <!-- 夹爪: 力矩范围 ±10 N -->
+    <motor name="actuator7" tendon="split" ctrlrange="-10 10" ctrllimited="true"/>
+  </actuator>
+
+  <keyframe>
+    <!-- home 位姿：ctrl 为初始力矩（全部为 0，机械臂将因重力下垂） -->
+    <key name="home" qpos="0 0 0 0 0 0 0.035 -0.035" ctrl="0 0 0 0 0 0 0"/>
+  </keyframe>
+
+  <contact>
+    <exclude body1="base_link" body2="link1"/>
+    <exclude body1="link6" body2="left_finger"/>
+    <exclude body1="link6" body2="right_finger"/>
+  </contact>
+</mujoco>

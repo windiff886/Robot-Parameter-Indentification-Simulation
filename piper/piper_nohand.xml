@@ -1,0 +1,118 @@
+<mujoco model="piper nohand">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <option integrator="implicitfast" timestep="0.001"/>
+
+  <default>
+    <default class="piper">
+      <material specular="0.5" shininess="0.25"/>
+      <joint armature="0.1" damping="1" axis="0 0 1"/>
+
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom type="mesh" group="3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <!-- 材质定义 -->
+    <material class="piper" name="white" rgba="1 1 1 1"/>
+    <material class="piper" name="body_color" rgba="0.792157 0.819608 0.933333 1"/>
+    <material class="piper" name="end_effector_color" rgba="0.898039 0.917647 0.929412 1"/>
+
+    <!-- Mesh 文件（同时用于视觉和碰撞） -->
+    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="link1" file="link1.STL"/>
+    <mesh name="link2" file="link2.STL"/>
+    <mesh name="link3" file="link3.STL"/>
+    <mesh name="link4" file="link4.STL"/>
+    <mesh name="link5" file="link5.STL"/>
+    <mesh name="link6" file="link6.STL"/>
+  </asset>
+
+  <worldbody>
+    <light name="top" pos="0 0 2" mode="trackcom"/>
+    <body name="base_link" childclass="piper">
+      <!-- 基座 -->
+      <inertial pos="-0.00473641 2.56829e-05 0.041452" mass="1.02"
+        fullinertia="0.00267433 0.00282612 0.00089624 -0.00000073 -0.00017389 0.0000004"/>
+      <geom mesh="base_link" material="body_color" class="visual"/>
+      <geom mesh="base_link" class="collision"/>
+
+      <body name="link1" pos="0 0 0.123">
+        <inertial pos="0.000121505 0.000104632 -0.00438597"
+          quat="0.682111 0.730899 0.0143111 -0.0175062" mass="0.71"
+          diaginertia="0.000489262 0.000439887 0.000404551"/>
+        <joint name="joint1" range="-2.618 2.618"/>
+        <geom mesh="link1" material="body_color" class="visual"/>
+        <geom mesh="link1" class="collision"/>
+
+        <body name="link2" pos="0 0 0" quat="0.0356735 -0.0356786 -0.706207 -0.706205">
+          <inertial pos="0.198666 -0.0109269 0.00142122"
+            quat="0.510131 0.475585 0.525075 0.48773" mass="1.17"
+            diaginertia="0.0679032 0.067745 0.00111966"/>
+          <joint name="joint2" range="0 3.14"/>
+          <geom mesh="link2" material="body_color" class="visual"/>
+          <geom mesh="link2" class="collision"/>
+
+          <body name="link3" pos="0.28503 0 0" quat="0.637536 0 0 -0.77042">
+            <inertial pos="-0.0202738 -0.133915 -0.000458683"
+              quat="0.706282 0.705111 0.0532202 0.0339395" mass="0.5"
+              diaginertia="0.0138227 0.0138032 0.000244685"/>
+            <joint name="joint3" range="-2.967 0"/>
+            <geom mesh="link3" material="body_color" class="visual"/>
+            <geom mesh="link3" class="collision"/>
+
+            <body name="link4" pos="-0.021984 -0.25075 0" quat="0.707105 0.707108 0 0">
+              <inertial pos="-9.66636e-05 0.000876064 -0.00496881"
+                quat="0.714689 -0.0948484 0.0635223 0.690064" mass="0.38"
+                diaginertia="0.000191586 0.000185052 0.000152863"/>
+              <joint name="joint4" range="-1.745 1.745"/>
+              <geom mesh="link4" material="body_color" class="visual"/>
+              <geom mesh="link4" class="collision"/>
+
+              <body name="link5" pos="0 0 0" quat="0.707105 -0.707108 0 0">
+                <inertial pos="-4.10554e-05 -0.0566487 -0.00372058"
+                  quat="0.709589 0.704614 0.00134613 -0.00132656" mass="0.383"
+                  diaginertia="0.00166169 0.00164328 0.000185028"/>
+                <joint name="joint5" range="-1.22 1.22"/>
+                <geom mesh="link5" material="body_color" class="visual"/>
+                <geom mesh="link5" class="collision"/>
+
+                <body name="link6" pos="8.8259e-05 -0.091 0" quat="0.707105 0.707108 0 0">
+                  <inertial pos="-8.8259e-05 9.0598e-06 -0.002"
+                    quat="0.999977 6.30554e-05 0.00678017 0.000789386" mass="0.007"
+                    diaginertia="1.06739e-06 5.73016e-07 5.73016e-07"/>
+                  <joint name="joint6" range="-2.0944 2.0944"/>
+                  <geom mesh="link6" material="end_effector_color" class="visual"/>
+                  <geom mesh="link6" class="collision"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- 纯力矩控制模式 -->
+  <actuator>
+    <motor name="actuator1" joint="joint1" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator2" joint="joint2" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator3" joint="joint3" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator4" joint="joint4" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator5" joint="joint5" ctrlrange="-100 100" ctrllimited="true"/>
+    <motor name="actuator6" joint="joint6" ctrlrange="-100 100" ctrllimited="true"/>
+  </actuator>
+
+  <keyframe>
+    <key name="home" qpos="0 0 0 0 0 0" ctrl="0 0 0 0 0 0"/>
+  </keyframe>
+
+  <contact>
+    <exclude body1="base_link" body2="link1"/>
+  </contact>
+</mujoco>
