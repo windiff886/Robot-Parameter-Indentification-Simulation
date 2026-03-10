@@ -1,6 +1,6 @@
 # 机械臂参数辨识：数学过程与代码流程（src/identification）
 
-本文档依据 `src/identification` 现有实现总结参数辨识的数学过程与代码流程。核心路径为 `Identification` + `MuJoCoRegressor`，目标是保证回归矩阵与 MuJoCo 动力学一致。
+本文档依据 `src/identification` 当前的无 ROS 实现，总结参数辨识的数学过程与代码流程。核心路径为 `Identification` + `MuJoCoRegressor`，目标是保证回归矩阵与 MuJoCo 动力学一致。
 
 ## 1. 范围与入口
 
@@ -8,7 +8,7 @@
 - 回归矩阵: `src/identification/include/mujoco_regressor.hpp`
 - 求解算法: `src/identification/include/identification/algorithms.hpp`
 - 数据加载: `src/identification/include/identification/data_loader.hpp`
-- 运行入口: `src/identification/src/main.cpp` (ROS2), `src/identification/src/mujoco_identify.cpp` (CLI)
+- 运行入口: `src/identification/src/main.cpp` (`identify` CLI), `src/identification/src/mujoco_identify.cpp` (`mujoco_identify` CLI)
 - 验证/诊断: `src/identification/src/regressor_test.cpp`, `src/identification/src/model_comparison.cpp`, `src/identification/src/dynamics_diagnostic.cpp`
 
 ## 2. 数据与符号
@@ -164,9 +164,9 @@ $$\min \| W\beta - \tau \|^2 + \lambda \|\beta\|^2, \; \lambda=1e-6$$
 - 用 `MuJoCoRegressor` 构建 $W$
 - `createAlgorithm` 根据字符串创建算法; 若返回 `nullptr` (CLOE) 则回退 OLS
 
-### 5.4 ROS2 入口流程 (`main.cpp`)
+### 5.4 CLI 入口流程 (`main.cpp`)
 
-- 参数读取: `data_file`, `algorithm`, `output_file`
+- 配置来源: 默认读取 `config/identification.yaml`，也支持命令行覆盖 `--data-file`、`--algorithm`、`--output-file`
 - MuJoCo 动力学验证: `MuJoCoPandaDynamics::computeInverseDynamics` 与记录 $\tau$ 对比
 - 训练/验证划分 (80%/20%)
 - 构建 $W_{val}$ 并评估列范数、条件数

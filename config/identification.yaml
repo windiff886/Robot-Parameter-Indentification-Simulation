@@ -1,8 +1,5 @@
-identification_node:
-  ros__parameters:
-    # Algorithm Selection:
-    # 0: Benchmark (Run All), 1: OLS, 2: WLS, 3: IRLS, 4: TLS, 5: EKF, 6: ML, 7: CLOE
-    algorithm: 0
-    # Using one of the existing files as default. User can change this.
-    data_file: "/home/windiff/Code/Simulation/data/benchmark_data_2026-01-18_15-54-50.csv"
-    output_file: "/home/windiff/Code/Simulation/results/identification.yaml"
+# 无 ROS 参数辨识配置
+# algorithm: 0 表示跑完整基准；1-7 分别对应 OLS/WLS/IRLS/TLS/EKF/ML/CLOE
+algorithm: 0
+data_file: "data/benchmark_data.csv"
+output_file: "results/identification.yaml"

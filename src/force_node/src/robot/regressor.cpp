@@ -31,8 +31,6 @@ StandardInertialParameters::fromLinkParameters(const LinkParameters &link) {
   const double m = link.mass;
 
   // Parallel axis theorem terms
-  const double c_dot_c = cx * cx + cy * cy + cz * cz;
-
   sip.Ixx = link.inertia.Ixx + m * (cy * cy + cz * cz);
   sip.Iyy = link.inertia.Iyy + m * (cx * cx + cz * cz);
   sip.Izz = link.inertia.Izz + m * (cx * cx + cy * cy);

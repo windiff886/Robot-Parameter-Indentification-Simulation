@@ -104,12 +104,12 @@ MuJoCo 将控制输入 `ctrl` 转换为执行器力，再映射为广义力：
   - 接触力（若发生碰撞）
  共同决定。
 
-## 5. 与本项目控制话题的对应关系
+## 5. 与本项目控制接口的对应关系
 
-在 `sim_com_node` 中，控制输入通过 ROS2 话题写入 MuJoCo：
+在当前无 ROS 版本中，控制输入由 `run_experiment` 进程内直接写入 MuJoCo：
 
-- 订阅话题：`panda/joint_torques`
-- 写入位置：`data->ctrl`
+- 力矩来源：`ForceController::computeTorque`
+- 写入位置：`PandaSimulator::step` 内部的 `data->ctrl`
 - 输入长度必须等于 `model->nu`（本模型 8 维）
 
 因此，当你“发送力矩”时，实际生效的是 **MuJoCo 经过限幅与执行器模型处理后的广义力**，并不是原始输入的直接叠加。

@@ -5,7 +5,7 @@
 **问题**: 辨识结果全零 (All-Zero Parameters) 或 数值爆炸 (Numerical Explosion)
 
 ## 1. 问题描述
-在运行动力学参数辨识（Identification Node）时，出现以下异常现象：
+在运行动力学参数辨识工具（当前对应 `identify` / `mujoco_identify`）时，出现以下异常现象：
 1.  **参数全零**：所有算法（OLS, WLS, IRLS 等）输出的参数矢量 $\beta$ 几乎全为 0（量级 $10^{-15}$）。
 2.  **数值爆炸**：在使用无正则化的 QR/SVD 求解时，部分参数飙升至 $10^{13}$ 量级。
 3.  **Benchmark 失败**：Torque RMSE 极高，模型完全无法预测力矩。

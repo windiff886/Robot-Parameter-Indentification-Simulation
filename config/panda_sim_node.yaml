@@ -1,3 +1,3 @@
-# sim_com_node config
-# JointState publish rate (Hz).
-publish_rate_hz: 100.0
+# Panda MuJoCo 仿真配置
+simulation_rate_hz: 1000.0
+enable_viewer: true

@@ -13,6 +13,7 @@
 #include "robot/franka_panda.hpp"
 #include "robot/robot_dynamics.hpp"
 #include <Eigen/Core>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 
@@ -55,7 +56,9 @@ int main(int argc, char** argv) {
     // ====================================================================
     // 2. 加载数据
     // ====================================================================
-    std::string data_file = "/home/windiff/Code/Simulation/data/benchmark_data_2026-01-18_15-54-50.csv";
+    std::string data_file =
+        (std::filesystem::path(PROJECT_ROOT_DIR) / "data" / "benchmark_data.csv")
+            .string();
     DataLoader loader;
     ExperimentData data = loader.loadCSV(data_file, 7);
     std::cout << "\nLoaded " << data.n_samples << " samples." << std::endl;

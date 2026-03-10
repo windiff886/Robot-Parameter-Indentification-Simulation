@@ -1,6 +1,6 @@
 # BIRDy 工作模式详解
 
-本此文档详细描述了 BIRDy (Benchmark for Identification of Robot Dynamics) 框架的两种主要工作模式。BIRDy 是一个用于机器人动力学参数辨识的 MATLAB 基准框架，本项目参考了该框架并将其与 ROS 2 和 MuJoCo 仿真环境进行了集成。
+本此文档详细描述了 BIRDy (Benchmark for Identification of Robot Dynamics) 框架的两种主要工作模式。BIRDy 是一个用于机器人动力学参数辨识的 MATLAB 基准框架，本项目参考了该框架，并在当前分支中将实验链路实现为 **MuJoCo + 纯 C++ 单进程程序**。
 
 ## 1. 仿真模式 (Simulation Mode)
 
@@ -41,7 +41,7 @@ graph TD
         *   **生成频率**: 从数学角度看，Fourier 轨迹是**连续时间 (Continuous-time)** 的函数，并没有固定的"生成频率"。
         *   **采样频率**: 在执行仿真时，轨迹会被离散化采样。
             *   在 **MATLAB 仿真模式** 下，通常使用 **1000 Hz** (1ms) 的采样率进行高精度动力学积分。
-            *   在 **ROS 2 / MuJoCo 仿真模式** (本项目配置) 下，默认采样/控制频率为 **100 Hz** (10ms)，但这可以通过 `config/panda_sim_node.yaml` 中的 `publish_rate_hz` 参数进行修改。
+            *   在 **当前 MuJoCo / C++ 实验模式** 下，默认仿真与控制频率为 **1000 Hz** (1ms)，可通过 `config/panda_sim_node.yaml` 中的 `simulation_rate_hz` 参数调整。
             *   **注意**: 即使是 100Hz 的控制频率，由于轨迹是解析连续的，我们可以随时计算任意时刻 $t$ 的精确 $(q, \dot{q}, \ddot{q})$ 值，而不需要通过差分。
 
 2.  **MATLAB 仿真执行 (Dynamics Simulation)**
@@ -111,11 +111,11 @@ graph TD
 
 ## 2. 实验模式 (Experiment Mode)
 
-实验模式用于真实的物理机器人或外部的高保真仿真器（如本项目的 MuJoCo 环境）。在这种模式下，BIRDy 主要充当轨迹生成器和数据分析器的角色，而轨迹的执行和数据采集由外部系统完成。
+实验模式用于真实的物理机器人或外部的高保真仿真器（如本项目的 MuJoCo 环境）。在当前分支中，BIRDy 主要充当轨迹生成器和数据分析器的角色，而轨迹执行与数据采集由仓库内的 `run_experiment` 单进程程序完成。
 
 ### 2.1 工作流程
 
-流程跨越了 MATLAB 和外部系统（Real Robot / ROS 2）：
+流程跨越了 MATLAB 和外部系统（Real Robot / MuJoCo C++ Runner）：
 
 ```mermaid
 sequenceDiagram
@@ -138,7 +138,7 @@ sequenceDiagram
     *   **导出**：将生成的轨迹离散化并导出为外部系统可读取的格式（如 CSV 或 MAT 文件）。包含时间戳 $t$、期望位置 $q_d$、期望速度 $\dot{q}_d$ 和前馈力矩 $\tau_{ff}$。
 
 2.  **外部执行轨迹 (Execution)**
-    *   **控制器**：外部系统（如本项目的 ROS 2 节点）读取轨迹文件。
+    *   **控制器**：外部系统（如本项目的 `run_experiment`）读取配置并生成/跟踪激励轨迹。
     *   **跟踪**：使用关节位置控制器（如 PD 控制）跟踪期望轨迹。
     *   **采集**：以高频率（如 1kHz）记录实际的关节位置 $q$、关节速度 $\dot{q}$ 和关节力矩 $\tau$。
     *   *注意*：通常无法直接测量关节加速度 $\ddot{q}$。
@@ -165,4 +165,4 @@ sequenceDiagram
 | **加速度获取**          | 解析计算 (精确)          | 数值微分 (含噪声)                    |
 | **真值 (Ground Truth)** | 已知 ($\beta_{true}$)    | 通常未知                             |
 | **噪声特性**            | 人工添加的高斯白噪声     | 包含摩擦、柔性、传感器噪声等复杂特性 |
-| **复杂度**              | 低                       | 高 (涉及通信、控制、信号处理)        |
+| **复杂度**              | 低                       | 高 (涉及控制、采样、信号处理)        |

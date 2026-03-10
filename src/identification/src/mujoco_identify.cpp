@@ -11,6 +11,7 @@
 #include "mujoco_panda_dynamics.hpp"
 #include "mujoco_regressor.hpp"
 #include <Eigen/Core>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 
@@ -59,8 +60,9 @@ int main(int argc, char **argv) {
   std::cout << std::string(80, '=') << "\n";
 
   // 默认数据文件
-  std::string data_file = "/home/windiff/Code/Simulation/data/"
-                          "benchmark_data_2026-01-18_15-54-50.csv";
+  std::string data_file =
+      (std::filesystem::path(PROJECT_ROOT_DIR) / "data" / "benchmark_data.csv")
+          .string();
   if (argc > 1) {
     data_file = argv[1];
   }

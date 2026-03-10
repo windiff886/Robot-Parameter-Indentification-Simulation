@@ -69,31 +69,30 @@ $$ a, b \sim Uniform(-Amplitude, +Amplitude) $$
 
 为了在“充分激励”和“安全执行”之间寻找平衡，程序实现了**阶梯式衰减**逻辑：
 
-1.  **初始尝试**：使用原始设定的 `Amplitude` (**0.2**)，以保证充分的激励空间。
+1.  **初始尝试**：使用原始设定的 `amplitude` (**0.15**)，以保证充分的激励空间。
 2.  **安全检查**：调用 MuJoCo 物理引擎检查轨迹是否发生碰撞。
 3.  **失败处理**：
     *   **耐心重试**：如果当前幅度下可以找到安全轨迹（只是运气不好随机到了坏的），程序会继续尝试，直到试满 **20次**。
-    *   **阶梯降级**：如果连续 **20次** 都失败，程序判断当前幅度过大，执行降级：`Amplitude *= 0.8`。
-    *   **下限保护**：直到 Amplitude 降至 `0.001` 为止。
+    *   **渐进降级**：如果尝试次数超过 **20次** 且仍然失败，程序判断当前幅度过大，执行降级：`amplitude *= 0.95`。
+    *   **下限保护**：直到 `amplitude` 降至 `0.01` 左右为止。
 
 这种机制既能尽可能保留大动作（高信噪比），又能在确实行不通时自动退让，确保系统鲁棒性。
 
 ### 3.3 代码实现
-相关逻辑位于 `src/force_node/src/force_controller_node.cpp` 中的 `init_excitation_trajectory` 函数。
+相关逻辑位于 `src/force_node/src/force_controller.cpp` 中的 `initExcitationTrajectory` 函数。
 
 ```cpp
 // 伪代码逻辑
-double amplitude = 0.2;
+double amplitude = 0.15;
 for (int attempt = 0; attempt < 200; ++attempt) {
     trajectory.setRandomCoefficients(amplitude);
     
-    if (check_trajectory(trajectory)) {
+    if (checkTrajectory(trajectory)) {
         return trajectory; // 成功
     }
     
-    // 每 20 次失败才降级一次
-    if ((attempt + 1) % 20 == 0 && amplitude > 0.001) {
-        amplitude *= 0.8; 
+    if (attempt > 20 && amplitude > 0.01) {
+        amplitude *= 0.95;
     }
 }
 ```
