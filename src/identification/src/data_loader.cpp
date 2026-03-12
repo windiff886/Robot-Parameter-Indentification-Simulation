@@ -39,20 +39,25 @@ ExperimentData DataLoader::loadCSV(const std::string &filename,
 
     // Detect format on first data row
     if (!format_detected) {
-      if (row.size() >= cols_with_qdd) {
+      if (row.size() == cols_with_qdd) {
         has_qdd = true;
-      } else if (row.size() >= cols_without_qdd) {
+      } else if (row.size() == cols_without_qdd) {
         has_qdd = false;
       } else {
-        continue; // Skip invalid lines
+        throw std::runtime_error("CSV 列数与配置的机械臂自由度不匹配: " +
+                                 std::to_string(row.size()) + " 列, 期望 " +
+                                 std::to_string(cols_with_qdd) + " 或 " +
+                                 std::to_string(cols_without_qdd) + " 列");
       }
       format_detected = true;
     }
 
     // Validate row size
     const std::size_t expected_cols = has_qdd ? cols_with_qdd : cols_without_qdd;
-    if (row.size() < expected_cols) {
-      continue; // Skip invalid lines
+    if (row.size() != expected_cols) {
+      throw std::runtime_error("CSV 数据行列数不一致: 实际 " +
+                               std::to_string(row.size()) + " 列, 期望 " +
+                               std::to_string(expected_cols) + " 列");
     }
 
     time_vec.push_back(row[0]);

@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -38,22 +39,146 @@ fs::path defaultRecordFile() {
   return repoRoot() / "data" / "benchmark_data.csv";
 }
 
+struct ExperimentConfig {
+  std::string robot = "panda";
+  fs::path controller_config;
+  fs::path sim_config;
+  fs::path scene_path;
+  fs::path collision_model;
+};
+
+std::string trimCopy(const std::string &input) {
+  const auto first = input.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {
+    return "";
+  }
+  const auto last = input.find_last_not_of(" \t\r\n");
+  return input.substr(first, last - first + 1);
+}
+
+std::optional<std::string> parseYamlString(const std::string &trimmed,
+                                           const std::string &key) {
+  if (trimmed.rfind(key, 0) != 0) {
+    return std::nullopt;
+  }
+
+  std::size_t pos = key.size();
+  while (pos < trimmed.size() &&
+         std::isspace(static_cast<unsigned char>(trimmed[pos]))) {
+    ++pos;
+  }
+  if (pos >= trimmed.size() || trimmed[pos] != ':') {
+    return std::nullopt;
+  }
+
+  std::string value = trimCopy(trimmed.substr(pos + 1));
+  const auto comment = value.find('#');
+  if (comment != std::string::npos) {
+    value = trimCopy(value.substr(0, comment));
+  }
+  if (value.size() >= 2 &&
+      ((value.front() == '"' && value.back() == '"') ||
+       (value.front() == '\'' && value.back() == '\''))) {
+    value = value.substr(1, value.size() - 2);
+  }
+  return value.empty() ? std::nullopt : std::optional<std::string>(value);
+}
+
+fs::path resolveRepoPath(const fs::path &path_value) {
+  if (path_value.empty() || path_value.is_absolute()) {
+    return path_value;
+  }
+  return repoRoot() / path_value;
+}
+
+ExperimentConfig defaultExperimentConfigForRobot(const std::string &robot) {
+  ExperimentConfig config;
+  config.robot = robot;
+  config.sim_config = repoRoot() / "config" / "panda_sim_node.yaml";
+
+  if (robot == "piper") {
+    config.controller_config =
+        repoRoot() / "config" / "piper_force_controller_node.yaml";
+    config.scene_path = repoRoot() / "piper" / "scene.xml";
+    config.collision_model = repoRoot() / "piper" / "piper.xml";
+    return config;
+  }
+
+  if (robot != "panda") {
+    throw std::runtime_error("不支持的机械臂类型: " + robot);
+  }
+
+  config.controller_config = repoRoot() / "config" / "force_controller_node.yaml";
+  config.scene_path = repoRoot() / "franka_emika_panda" / "scene.xml";
+  config.collision_model = repoRoot() / "franka_emika_panda" / "panda.xml";
+  return config;
+}
+
+ExperimentConfig loadExperimentConfig(const fs::path &config_path) {
+  ExperimentConfig parsed;
+
+  std::ifstream file(config_path);
+  if (file) {
+    std::string line;
+    while (std::getline(file, line)) {
+      const std::string trimmed = trimCopy(line);
+      if (trimmed.empty() || trimmed.front() == '#') {
+        continue;
+      }
+      if (const auto robot = parseYamlString(trimmed, "robot")) {
+        parsed.robot = *robot;
+      } else if (const auto controller =
+                     parseYamlString(trimmed, "controller_config")) {
+        parsed.controller_config = resolveRepoPath(*controller);
+      } else if (const auto sim = parseYamlString(trimmed, "sim_config")) {
+        parsed.sim_config = resolveRepoPath(*sim);
+      } else if (const auto scene = parseYamlString(trimmed, "scene")) {
+        parsed.scene_path = resolveRepoPath(*scene);
+      } else if (const auto collision =
+                     parseYamlString(trimmed, "collision_model")) {
+        parsed.collision_model = resolveRepoPath(*collision);
+      }
+    }
+  }
+
+  auto resolved = defaultExperimentConfigForRobot(parsed.robot);
+  if (!parsed.controller_config.empty()) {
+    resolved.controller_config = parsed.controller_config;
+  }
+  if (!parsed.sim_config.empty()) {
+    resolved.sim_config = parsed.sim_config;
+  }
+  if (!parsed.scene_path.empty()) {
+    resolved.scene_path = parsed.scene_path;
+  }
+  if (!parsed.collision_model.empty()) {
+    resolved.collision_model = parsed.collision_model;
+  }
+  return resolved;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
   try {
+    const fs::path experiment_config_path = readArgPath(
+        argc, argv, "--experiment-config",
+        repoRoot() / "config" / "experiment.yaml");
+    const ExperimentConfig experiment_config =
+        loadExperimentConfig(experiment_config_path);
+
     const fs::path force_config = readArgPath(
         argc, argv, "--controller-config",
-        repoRoot() / "config" / "force_controller_node.yaml");
+        experiment_config.controller_config);
     const fs::path sim_config = readArgPath(
         argc, argv, "--sim-config",
-        repoRoot() / "config" / "panda_sim_node.yaml");
+        experiment_config.sim_config);
     const fs::path scene_path = readArgPath(
         argc, argv, "--scene",
-        repoRoot() / "franka_emika_panda" / "scene.xml");
+        experiment_config.scene_path);
     const fs::path collision_model = readArgPath(
         argc, argv, "--collision-model",
-        repoRoot() / "franka_emika_panda" / "panda.xml");
+        experiment_config.collision_model);
     const fs::path output_csv =
         readArgPath(argc, argv, "--output", defaultRecordFile());
     const bool headless = hasFlag(argc, argv, "--headless");
@@ -64,7 +189,7 @@ int main(int argc, char **argv) {
 
     force_node::ForceController controller(controller_config, collision_model);
     sim_com_node::PandaSimulator simulator(sim_config_loaded, scene_path,
-                                           output_csv);
+                                           output_csv, controller.armDOF());
 
     const double end_time = controller.trajectoryDuration() + 2.0;
     while (simulator.simulationTime() < end_time) {

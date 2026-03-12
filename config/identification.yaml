@@ -1,5 +1,7 @@
 # 无 ROS 参数辨识配置
-# algorithm: 0 表示跑完整基准；1-7 分别对应 OLS/WLS/IRLS/TLS/EKF/ML/CLOE
+# robot 可选: panda / piper
+robot: "piper"
+# algorithm: 0 表示跑完整基准；1-8 分别对应 OLS/WLS/IRLS/TLS/EKF/ML/CLOE/NLS_FRICTION
 algorithm: 0
 data_file: "data/benchmark_data.csv"
 output_file: "results/identification.yaml"

@@ -3,218 +3,106 @@
  * @brief 基于 MuJoCo 运动学的回归矩阵计算实现
  */
 
-#include "mujoco_regressor.hpp"
+#include "mujoco_piper_regressor.hpp"
 #include <iostream>
 
 namespace mujoco_dynamics {
 
 // ============================================================================
-// MuJoCoInertialParams
+// MuJoCoPiperRegressor 构造函数
 // ============================================================================
 
-MuJoCoInertialParams
-MuJoCoInertialParams::fromMuJoCoBody(const MuJoCoBody &body) {
-  MuJoCoInertialParams params;
+MuJoCoPiperRegressor::MuJoCoPiperRegressor() { initBodies(); }
 
-  params.m = body.mass;
-
-  // 一阶矩: m * c
-  params.mx = body.mass * body.com.x();
-  params.my = body.mass * body.com.y();
-  params.mz = body.mass * body.com.z();
-
-  // 惯量张量从质心转换到 Body 原点 (平行轴定理)
-  // I_origin = I_com + m * (c^T * c * I - c * c^T)
-  double cx = body.com.x();
-  double cy = body.com.y();
-  double cz = body.com.z();
-  double m = body.mass;
-
-  params.Ixx = body.Ixx + m * (cy * cy + cz * cz);
-  params.Iyy = body.Iyy + m * (cx * cx + cz * cz);
-  params.Izz = body.Izz + m * (cx * cx + cy * cy);
-  params.Ixy = body.Ixy - m * cx * cy;
-  params.Ixz = body.Ixz - m * cx * cz;
-  params.Iyz = body.Iyz - m * cy * cz;
-
-  return params;
-}
-
-// ============================================================================
-// MuJoCoRegressor 构造函数
-// ============================================================================
-
-MuJoCoRegressor::MuJoCoRegressor() { initBodies(); }
-
-void MuJoCoRegressor::initBodies() {
-  // 复制 MuJoCoPandaDynamics 的 Body 参数 (来自 panda.xml)
-
-  // Link 0 (基座，无关节)
-  bodies_[0].name = "link0";
-  bodies_[0].pos = Vector3d(0, 0, 0);
-  bodies_[0].quat = Quaterniond(1, 0, 0, 0);
-  bodies_[0].mass = 0.629769;
-  bodies_[0].com = Vector3d(-0.041018, -0.00014, 0.049974);
-  bodies_[0].Ixx = 0.00315;
-  bodies_[0].Iyy = 0.00388;
-  bodies_[0].Izz = 0.004285;
-  bodies_[0].Ixy = 8.2904e-7;
-  bodies_[0].Ixz = 0.00015;
-  bodies_[0].Iyz = 8.2299e-6;
+void MuJoCoPiperRegressor::initBodies() {
+  bodies_[0].name = "base_link";
+  bodies_[0].mass = 1.02;
+  bodies_[0].com = Vector3d(-0.00473641, 2.56829e-05, 0.041452);
+  bodies_[0].Ixx = 0.00267433;
+  bodies_[0].Iyy = 0.00282612;
+  bodies_[0].Izz = 0.00089624;
+  bodies_[0].Ixy = -0.00000073;
+  bodies_[0].Ixz = -0.00017389;
+  bodies_[0].Iyz = 0.0000004;
   bodies_[0].has_joint = false;
 
-  // Link 1
   bodies_[1].name = "link1";
-  bodies_[1].pos = Vector3d(0, 0, 0.333);
-  bodies_[1].quat = Quaterniond(1, 0, 0, 0);
-  bodies_[1].mass = 4.970684;
-  bodies_[1].com = Vector3d(0.003875, 0.002081, -0.04762);
-  bodies_[1].Ixx = 0.70337;
-  bodies_[1].Iyy = 0.70661;
-  bodies_[1].Izz = 0.0091170;
-  bodies_[1].Ixy = -0.00013900;
-  bodies_[1].Ixz = 0.0067720;
-  bodies_[1].Iyz = 0.019169;
-  bodies_[1].joint_axis = Vector3d(0, 0, 1);
-  bodies_[1].armature = 0.1;
-  bodies_[1].damping = 1.0;
+  bodies_[1].pos = Vector3d(0.0, 0.0, 0.123);
+  bodies_[1].quat = Quaterniond(1.0, 0.0, 0.0, 0.0);
+  bodies_[1].mass = 0.71;
+  bodies_[1].com = Vector3d(0.000121505, 0.000104632, -0.00438597);
+  bodies_[1].Ixx = 0.000489262;
+  bodies_[1].Iyy = 0.000439887;
+  bodies_[1].Izz = 0.000404551;
   bodies_[1].has_joint = true;
 
-  // Link 2
   bodies_[2].name = "link2";
-  bodies_[2].pos = Vector3d(0, 0, 0);
-  bodies_[2].quat = Quaterniond(1, -1, 0, 0).normalized();
-  bodies_[2].mass = 0.646926;
-  bodies_[2].com = Vector3d(-0.003141, -0.02872, 0.003495);
-  bodies_[2].Ixx = 0.0079620;
-  bodies_[2].Iyy = 2.8110e-2;
-  bodies_[2].Izz = 2.5995e-2;
-  bodies_[2].Ixy = -3.925e-3;
-  bodies_[2].Ixz = 1.0254e-2;
-  bodies_[2].Iyz = 7.04e-4;
-  bodies_[2].joint_axis = Vector3d(0, 0, 1);
-  bodies_[2].armature = 0.1;
-  bodies_[2].damping = 1.0;
+  bodies_[2].quat = Quaterniond(0.0356735, -0.0356786, -0.706207, -0.706205);
+  bodies_[2].mass = 1.17;
+  bodies_[2].com = Vector3d(0.198666, -0.0109269, 0.00142122);
+  bodies_[2].Ixx = 0.0679032;
+  bodies_[2].Iyy = 0.067745;
+  bodies_[2].Izz = 0.00111966;
   bodies_[2].has_joint = true;
 
-  // Link 3
   bodies_[3].name = "link3";
-  bodies_[3].pos = Vector3d(0, -0.316, 0);
-  bodies_[3].quat = Quaterniond(1, 1, 0, 0).normalized();
-  bodies_[3].mass = 3.228604;
-  bodies_[3].com = Vector3d(2.7518e-2, 3.9252e-2, -6.6502e-2);
-  bodies_[3].Ixx = 3.7242e-2;
-  bodies_[3].Iyy = 3.6155e-2;
-  bodies_[3].Izz = 1.083e-2;
-  bodies_[3].Ixy = -4.761e-3;
-  bodies_[3].Ixz = -1.1396e-2;
-  bodies_[3].Iyz = -1.2805e-2;
-  bodies_[3].joint_axis = Vector3d(0, 0, 1);
-  bodies_[3].armature = 0.1;
-  bodies_[3].damping = 1.0;
+  bodies_[3].pos = Vector3d(0.28503, 0.0, 0.0);
+  bodies_[3].quat = Quaterniond(0.637536, 0.0, 0.0, -0.77042);
+  bodies_[3].mass = 0.5;
+  bodies_[3].com = Vector3d(-0.0202738, -0.133915, -0.000458683);
+  bodies_[3].Ixx = 0.0138227;
+  bodies_[3].Iyy = 0.0138032;
+  bodies_[3].Izz = 0.000244685;
   bodies_[3].has_joint = true;
 
-  // Link 4
   bodies_[4].name = "link4";
-  bodies_[4].pos = Vector3d(0.0825, 0, 0);
-  bodies_[4].quat = Quaterniond(1, 1, 0, 0).normalized();
-  bodies_[4].mass = 3.587895;
-  bodies_[4].com = Vector3d(-5.317e-2, 1.04419e-1, 2.7454e-2);
-  bodies_[4].Ixx = 2.5853e-2;
-  bodies_[4].Iyy = 1.9552e-2;
-  bodies_[4].Izz = 2.8323e-2;
-  bodies_[4].Ixy = 7.796e-3;
-  bodies_[4].Ixz = -1.332e-3;
-  bodies_[4].Iyz = 8.641e-3;
-  bodies_[4].joint_axis = Vector3d(0, 0, 1);
-  bodies_[4].armature = 0.1;
-  bodies_[4].damping = 1.0;
+  bodies_[4].pos = Vector3d(-0.021984, -0.25075, 0.0);
+  bodies_[4].quat = Quaterniond(0.707105, 0.707108, 0.0, 0.0);
+  bodies_[4].mass = 0.38;
+  bodies_[4].com = Vector3d(-9.66636e-05, 0.000876064, -0.00496881);
+  bodies_[4].Ixx = 0.000191586;
+  bodies_[4].Iyy = 0.000185052;
+  bodies_[4].Izz = 0.000152863;
   bodies_[4].has_joint = true;
 
-  // Link 5
   bodies_[5].name = "link5";
-  bodies_[5].pos = Vector3d(-0.0825, 0.384, 0);
-  bodies_[5].quat = Quaterniond(1, -1, 0, 0).normalized();
-  bodies_[5].mass = 1.225946;
-  bodies_[5].com = Vector3d(-1.1953e-2, 4.1065e-2, -3.8437e-2);
-  bodies_[5].Ixx = 3.5549e-2;
-  bodies_[5].Iyy = 2.9474e-2;
-  bodies_[5].Izz = 8.627e-3;
-  bodies_[5].Ixy = -2.117e-3;
-  bodies_[5].Ixz = -4.037e-3;
-  bodies_[5].Iyz = 2.29e-4;
-  bodies_[5].joint_axis = Vector3d(0, 0, 1);
-  bodies_[5].armature = 0.1;
-  bodies_[5].damping = 1.0;
+  bodies_[5].quat = Quaterniond(0.707105, -0.707108, 0.0, 0.0);
+  bodies_[5].mass = 0.383;
+  bodies_[5].com = Vector3d(-4.10554e-05, -0.0566487, -0.00372058);
+  bodies_[5].Ixx = 0.00166169;
+  bodies_[5].Iyy = 0.00164328;
+  bodies_[5].Izz = 0.000185028;
   bodies_[5].has_joint = true;
 
-  // Link 6
   bodies_[6].name = "link6";
-  bodies_[6].pos = Vector3d(0, 0, 0);
-  bodies_[6].quat = Quaterniond(1, 1, 0, 0).normalized();
-  bodies_[6].mass = 1.666555;
-  bodies_[6].com = Vector3d(6.0149e-2, -1.4117e-2, -1.0517e-2);
-  bodies_[6].Ixx = 1.964e-3;
-  bodies_[6].Iyy = 4.354e-3;
-  bodies_[6].Izz = 5.433e-3;
-  bodies_[6].Ixy = 1.09e-4;
-  bodies_[6].Ixz = -1.158e-3;
-  bodies_[6].Iyz = 3.41e-4;
-  bodies_[6].joint_axis = Vector3d(0, 0, 1);
-  bodies_[6].armature = 0.1;
-  bodies_[6].damping = 1.0;
+  bodies_[6].pos = Vector3d(8.8259e-05, -0.091, 0.0);
+  bodies_[6].quat = Quaterniond(0.707105, 0.707108, 0.0, 0.0);
+  bodies_[6].mass = 0.456991;
+  bodies_[6].com = Vector3d(-0.000182345, 7.94104e-05, 0.0316214);
+  bodies_[6].Ixx = 0.000938039;
+  bodies_[6].Iyy = 0.000723068;
+  bodies_[6].Izz = 0.000395388;
   bodies_[6].has_joint = true;
 
-  // Link 7
-  bodies_[7].name = "link7";
-  bodies_[7].pos = Vector3d(0.088, 0, 0);
-  bodies_[7].quat = Quaterniond(1, 1, 0, 0).normalized();
-  bodies_[7].mass = 7.35522e-01;
-  bodies_[7].com = Vector3d(1.0517e-2, -4.252e-3, 6.1597e-2);
-  bodies_[7].Ixx = 1.2516e-2;
-  bodies_[7].Iyy = 1.0027e-2;
-  bodies_[7].Izz = 4.815e-3;
-  bodies_[7].Ixy = -4.28e-4;
-  bodies_[7].Ixz = -1.196e-3;
-  bodies_[7].Iyz = -7.41e-4;
-  bodies_[7].joint_axis = Vector3d(0, 0, 1);
-  bodies_[7].armature = 0.1;
-  bodies_[7].damping = 1.0;
-  bodies_[7].has_joint = true;
-
-  // Hand (固定连接到 link7)
-  bodies_[8].name = "hand";
-  bodies_[8].pos = Vector3d(0, 0, 0.107);
-  bodies_[8].quat = Quaterniond(0.9238795, 0, 0, -0.3826834);
-  bodies_[8].mass = 0.73;
-  bodies_[8].com = Vector3d(-0.01, 0, 0.03);
-  bodies_[8].Ixx = 0.001;
-  bodies_[8].Iyy = 0.0025;
-  bodies_[8].Izz = 0.0017;
-  bodies_[8].Ixy = 0;
-  bodies_[8].Ixz = 0;
-  bodies_[8].Iyz = 0;
-  bodies_[8].has_joint = false;
-
-  // 手指 (暂不计入)
-  bodies_[9].name = "left_finger";
-  bodies_[9].has_joint = false;
-  bodies_[10].name = "right_finger";
-  bodies_[10].has_joint = false;
+  for (std::size_t i = 1; i <= N_BODIES; ++i) {
+    bodies_[i].joint_axis = Vector3d(0.0, 0.0, 1.0);
+    bodies_[i].armature = 0.1;
+    bodies_[i].damping = 1.0;
+  }
 }
 
 // ============================================================================
 // 辅助函数
 // ============================================================================
 
-MuJoCoRegressor::Matrix3d MuJoCoRegressor::skew(const Vector3d &v) {
+MuJoCoPiperRegressor::Matrix3d MuJoCoPiperRegressor::skew(const Vector3d &v) {
   Matrix3d S;
   S << 0, -v(2), v(1), v(2), 0, -v(0), -v(1), v(0), 0;
   return S;
 }
 
-MuJoCoRegressor::Matrix4d
-MuJoCoRegressor::poseToTransform(const Vector3d &pos, const Quaterniond &quat) {
+MuJoCoPiperRegressor::Matrix4d
+MuJoCoPiperRegressor::poseToTransform(const Vector3d &pos, const Quaterniond &quat) {
   Matrix4d T = Matrix4d::Identity();
   T.block<3, 3>(0, 0) = quat.toRotationMatrix();
   T.block<3, 1>(0, 3) = pos;
@@ -225,16 +113,16 @@ MuJoCoRegressor::poseToTransform(const Vector3d &pos, const Quaterniond &quat) {
 // 运动学
 // ============================================================================
 
-std::vector<MuJoCoRegressor::Matrix4d>
-MuJoCoRegressor::computeBodyTransforms(const VectorXd &q) const {
-  std::vector<Matrix4d> transforms(11); // N_BODIES
+std::vector<MuJoCoPiperRegressor::Matrix4d>
+MuJoCoPiperRegressor::computeBodyTransforms(const VectorXd &q) const {
+  std::vector<Matrix4d> transforms(N_BODIES + 1);
 
   // link0 在世界坐标系
   transforms[0] = poseToTransform(bodies_[0].pos, bodies_[0].quat);
 
   std::size_t joint_idx = 0;
 
-  for (std::size_t i = 1; i < 8; ++i) { // link1-7
+  for (std::size_t i = 1; i <= N_BODIES; ++i) {
     const auto &body = bodies_[i];
 
     // 相对于父 body 的基础变换
@@ -256,15 +144,11 @@ MuJoCoRegressor::computeBodyTransforms(const VectorXd &q) const {
     }
   }
 
-  // hand 固定连接到 link7
-  transforms[8] =
-      transforms[7] * poseToTransform(bodies_[8].pos, bodies_[8].quat);
-
   return transforms;
 }
 
-MuJoCoRegressor::Vector3d
-MuJoCoRegressor::computeBodyCOM(std::size_t body_idx, const VectorXd &q) const {
+MuJoCoPiperRegressor::Vector3d
+MuJoCoPiperRegressor::computeBodyCOM(std::size_t body_idx, const VectorXd &q) const {
   auto transforms = computeBodyTransforms(q);
   Vector3d com_local = bodies_[body_idx].com;
   Matrix4d T = transforms[body_idx];
@@ -280,8 +164,8 @@ MuJoCoRegressor::computeBodyCOM(std::size_t body_idx, const VectorXd &q) const {
  *
  * 回归矩阵使用标准惯性参数 (m, mc, I_origin)，惯量定义在 Body 原点
  */
-MuJoCoRegressor::MatrixXd
-MuJoCoRegressor::computeBodyOriginJacobian(std::size_t body_idx,
+MuJoCoPiperRegressor::MatrixXd
+MuJoCoPiperRegressor::computeBodyOriginJacobian(std::size_t body_idx,
                                            const VectorXd &q) const {
   MatrixXd J = MatrixXd::Zero(6, N_DOF);
 
@@ -292,7 +176,7 @@ MuJoCoRegressor::computeBodyOriginJacobian(std::size_t body_idx,
 
   // 对每个关节
   std::size_t joint_count = 0;
-  for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
+  for (std::size_t i = 1; i <= body_idx && i <= N_BODIES; ++i) {
     if (bodies_[i].has_joint) {
       // 关节轴在世界坐标系中的方向
       Vector3d z_axis = transforms[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
@@ -313,8 +197,8 @@ MuJoCoRegressor::computeBodyOriginJacobian(std::size_t body_idx,
   return J;
 }
 
-MuJoCoRegressor::MatrixXd
-MuJoCoRegressor::computeBodyJacobian(std::size_t body_idx,
+MuJoCoPiperRegressor::MatrixXd
+MuJoCoPiperRegressor::computeBodyJacobian(std::size_t body_idx,
                                      const VectorXd &q) const {
   MatrixXd J = MatrixXd::Zero(6, N_DOF);
 
@@ -323,7 +207,7 @@ MuJoCoRegressor::computeBodyJacobian(std::size_t body_idx,
 
   // 对每个关节
   std::size_t joint_count = 0;
-  for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
+  for (std::size_t i = 1; i <= body_idx && i <= N_BODIES; ++i) {
     if (bodies_[i].has_joint) {
       // 关节轴在世界坐标系中的方向
       Vector3d z_axis = transforms[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
@@ -344,7 +228,7 @@ MuJoCoRegressor::computeBodyJacobian(std::size_t body_idx,
   return J;
 }
 
-MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyOriginJacobianDerivative(
+MuJoCoPiperRegressor::MatrixXd MuJoCoPiperRegressor::computeBodyOriginJacobianDerivative(
     std::size_t body_idx, const VectorXd &q, const VectorXd &qd) const {
   // 数值微分
   const double eps = 1e-7;
@@ -357,7 +241,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyOriginJacobianDerivative(
   return (J_plus - J_minus) / (2.0 * eps);
 }
 
-MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyJacobianDerivative(
+MuJoCoPiperRegressor::MatrixXd MuJoCoPiperRegressor::computeBodyJacobianDerivative(
     std::size_t body_idx, const VectorXd &q, const VectorXd &qd) const {
   // 数值微分
   const double eps = 1e-7;
@@ -374,8 +258,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyJacobianDerivative(
 // 参数向量
 // ============================================================================
 
-std::size_t MuJoCoRegressor::numParameters(MuJoCoParamFlags flags) const {
-  // 8 个 Body (link1-7 + hand)，每个 10 个惯性参数
+std::size_t MuJoCoPiperRegressor::numParameters(MuJoCoParamFlags flags) const {
   std::size_t params = N_BODIES * MuJoCoInertialParams::PARAMS_PER_BODY;
 
   if (hasFlag(flags, MuJoCoParamFlags::ARMATURE)) {
@@ -389,14 +272,14 @@ std::size_t MuJoCoRegressor::numParameters(MuJoCoParamFlags flags) const {
   return params;
 }
 
-MuJoCoRegressor::VectorXd
-MuJoCoRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
+MuJoCoPiperRegressor::VectorXd
+MuJoCoPiperRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
   const std::size_t num_params = numParameters(flags);
   VectorXd theta = VectorXd::Zero(num_params);
 
-  // 填充惯性参数 (link1-7 + hand)
+  // 填充惯性参数 (link1-6)
   for (std::size_t i = 0; i < N_BODIES; ++i) {
-    std::size_t body_idx = i + 1; // bodies_[1] 到 bodies_[8]
+    std::size_t body_idx = i + 1;
     auto sip = MuJoCoInertialParams::fromMuJoCoBody(bodies_[body_idx]);
     auto sip_vec = sip.toVector();
 
@@ -425,11 +308,11 @@ MuJoCoRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
 }
 
 std::vector<std::string>
-MuJoCoRegressor::getParameterNames(MuJoCoParamFlags flags) const {
+MuJoCoPiperRegressor::getParameterNames(MuJoCoParamFlags flags) const {
   std::vector<std::string> names;
 
-  const char *body_names[] = {"link1", "link2", "link3", "link4",
-                              "link5", "link6", "link7", "hand"};
+  const char *body_names[] = {"link1", "link2", "link3",
+                              "link4", "link5", "link6"};
   const char *param_names[] = {"m",   "mx",  "my",  "mz",  "Ixx",
                                "Ixy", "Ixz", "Iyy", "Iyz", "Izz"};
 
@@ -458,7 +341,7 @@ MuJoCoRegressor::getParameterNames(MuJoCoParamFlags flags) const {
 // 回归矩阵
 // ============================================================================
 
-MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
+MuJoCoPiperRegressor::MatrixXd MuJoCoPiperRegressor::computeBodyRegressorBlock(
     std::size_t body_idx, const VectorXd &q, const VectorXd &qd,
     const VectorXd &qdd) const {
 
@@ -486,7 +369,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
   // ========== 计算 Body 原点的雅可比 (世界坐标系) ==========
   MatrixXd J_world = MatrixXd::Zero(6, N_DOF);
   std::size_t joint_count = 0;
-  for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
+  for (std::size_t i = 1; i <= body_idx && i <= N_BODIES; ++i) {
     if (bodies_[i].has_joint) {
       Vector3d z_axis = transforms[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
       Vector3d p_joint = transforms[i].block<3, 1>(0, 3);
@@ -504,7 +387,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
 
   MatrixXd J_world_plus = MatrixXd::Zero(6, N_DOF);
   joint_count = 0;
-  for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
+  for (std::size_t i = 1; i <= body_idx && i <= N_BODIES; ++i) {
     if (bodies_[i].has_joint) {
       Vector3d z_axis =
           transforms_plus[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
@@ -577,8 +460,8 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
   return Y_block;
 }
 
-MuJoCoRegressor::MatrixXd
-MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
+MuJoCoPiperRegressor::MatrixXd
+MuJoCoPiperRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
                                         const VectorXd &qdd,
                                         MuJoCoParamFlags flags) const {
 
@@ -587,7 +470,7 @@ MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
 
   // 计算每个 Body 的回归矩阵块
   for (std::size_t i = 0; i < N_BODIES; ++i) {
-    std::size_t body_idx = i + 1; // bodies_[1] 到 bodies_[8]
+    std::size_t body_idx = i + 1;
     MatrixXd Y_body = computeBodyRegressorBlock(body_idx, q, qd, qdd);
 
     std::size_t offset = i * MuJoCoInertialParams::PARAMS_PER_BODY;
@@ -616,8 +499,8 @@ MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
   return Y;
 }
 
-MuJoCoRegressor::MatrixXd
-MuJoCoRegressor::computeObservationMatrix(const MatrixXd &Q, const MatrixXd &Qd,
+MuJoCoPiperRegressor::MatrixXd
+MuJoCoPiperRegressor::computeObservationMatrix(const MatrixXd &Q, const MatrixXd &Qd,
                                           const MatrixXd &Qdd,
                                           MuJoCoParamFlags flags) const {
 

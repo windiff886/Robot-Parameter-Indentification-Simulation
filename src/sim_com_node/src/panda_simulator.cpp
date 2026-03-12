@@ -108,8 +108,9 @@ PandaSimConfig PandaSimulator::loadConfig(const std::filesystem::path &path) {
 
 PandaSimulator::PandaSimulator(const PandaSimConfig &config,
                                const std::filesystem::path &scene_path,
-                               const std::filesystem::path &record_file)
-    : config_(config) {
+                               const std::filesystem::path &record_file,
+                               std::size_t recorded_dof)
+    : config_(config), recorded_dof_(recorded_dof) {
   if (!fs::exists(scene_path)) {
     throw std::runtime_error("MuJoCo 场景文件不存在: " + scene_path.string());
   }
@@ -150,6 +151,9 @@ PandaSimulator::PandaSimulator(const PandaSimConfig &config,
 
   if (joint_indices_.empty()) {
     throw std::runtime_error("未在模型中找到可用关节");
+  }
+  if (recorded_dof_ == 0 || recorded_dof_ > joint_indices_.size()) {
+    throw std::runtime_error("记录自由度配置非法，超出当前模型可用关节数");
   }
 
   startDataRecording(record_file);
@@ -219,18 +223,17 @@ void PandaSimulator::startDataRecording(const std::filesystem::path &record_file
     throw std::runtime_error("无法创建数据文件: " + record_file.string());
   }
 
-  constexpr std::size_t arm_dof = 7;
   data_file_ << "time";
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     data_file_ << ",q" << i;
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     data_file_ << ",qd" << i;
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     data_file_ << ",qdd" << i;
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     data_file_ << ",tau" << i;
   }
   data_file_ << "\n";
@@ -249,22 +252,21 @@ void PandaSimulator::recordCurrentStep() {
     return;
   }
 
-  constexpr std::size_t arm_dof = 7;
   std::ostringstream stream;
   stream << std::fixed << std::setprecision(6) << simulation_time_;
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     const int joint_index = joint_indices_[i];
     stream << "," << data_->qpos[model_->jnt_qposadr[joint_index]];
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     const int joint_index = joint_indices_[i];
     stream << "," << data_->qvel[model_->jnt_dofadr[joint_index]];
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     const int joint_index = joint_indices_[i];
     stream << "," << data_->qacc[model_->jnt_dofadr[joint_index]];
   }
-  for (std::size_t i = 0; i < arm_dof; ++i) {
+  for (std::size_t i = 0; i < recorded_dof_; ++i) {
     stream << "," << data_->ctrl[i];
   }
   stream << "\n";

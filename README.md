@@ -41,15 +41,27 @@ cmake --build build --parallel
 
 默认会：
 
+- 读取 [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml)
 - 读取 [force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/force_controller_node.yaml)
 - 读取 [panda_sim_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/panda_sim_node.yaml)
 - 使用 [scene.xml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/franka_emika_panda/scene.xml)
 - 在 `data/benchmark_data.csv` 输出采样数据
 
+通过修改 [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml) 中的
+`robot` 字段，可以在 `panda` 和 `piper` 之间切换。切到 `piper` 时会自动改用
+[piper_force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_force_controller_node.yaml)
+和 `piper` 对应的 MuJoCo 模型。
+
 可选参数：
 
 ```bash
 ./build/run_experiment --headless --output data/my_run.csv
+```
+
+也可以显式指定实验配置：
+
+```bash
+./build/run_experiment --experiment-config config/experiment.yaml
 ```
 
 ### 5. 运行参数辨识
@@ -58,11 +70,18 @@ cmake --build build --parallel
 ./build/identify
 ```
 
+默认读取 [identification.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/identification.yaml)。
+其中 `robot` 字段可以在 `panda` 和 `piper` 之间切换，`identify` 会据此选择
+对应的自由度、动力学基准和回归矩阵构造方式。`panda` 使用 7 轴链路，
+`piper` 使用 6 轴链路。
+
 可选参数：
 
 ```bash
 ./build/identify --config config/identification.yaml
+./build/identify --robot piper
 ./build/identify --data-file data/benchmark_data.csv --algorithm 1
+./build/identify --data-file data/benchmark_data.csv --algorithm 8
 ./build/mujoco_identify data/benchmark_data.csv
 ```
 
@@ -113,8 +132,8 @@ run_experiment
    results/identification.yaml
 ```
 
-- `run_experiment` 是实验调度入口，负责加载配置、创建控制器与仿真器，并驱动整个时间循环。
-- `ForceController` 负责激励轨迹生成、PD 跟踪、力矩限幅和碰撞前安全检查。
+- `run_experiment` 是实验调度入口，负责读取实验配置、选择机械臂、创建控制器与仿真器，并驱动整个时间循环。
+- `ForceController` 负责激励轨迹生成、PD 跟踪、力矩限幅，以及基于关节限位和 MuJoCo 碰撞检测的安全检查。
 - `PandaSimulator` 负责 MuJoCo 模型加载、物理步进、可视化窗口和 CSV 记录。
 - `identify` 与 `mujoco_identify` 负责离线辨识，读取实验 CSV，构造观测矩阵并输出参数结果。
 
@@ -131,6 +150,7 @@ run_experiment
 
 - `run_experiment`：运行单进程 MuJoCo 闭环实验并生成 CSV
 - `identify`：读取 CSV，执行单算法或完整 benchmark
+  支持 `NLS_FRICTION` 非线性摩擦联合辨识（`--algorithm 8`）
 - `mujoco_identify`：快速执行一次 MuJoCo 回归辨识
 - `dynamics_diagnostic`：对比动力学模型与记录数据
 - `model_comparison`：对比不同动力学模型

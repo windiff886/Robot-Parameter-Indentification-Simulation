@@ -1,7 +1,5 @@
 #include "force_node/force_controller.hpp"
 
-#include "robot/robot_kinematics.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -97,25 +95,36 @@ ForceController::loadConfig(const std::filesystem::path &config_path) {
 ForceController::ForceController(const ForceControllerConfig &config,
                                  const std::filesystem::path &collision_model)
     : config_(config), trajectory_duration_(config.trajectory_duration) {
-  if (config_.kp.size() != NUM_ARM_JOINTS || config_.kd.size() != NUM_ARM_JOINTS ||
-      config_.target_position.size() != NUM_ARM_JOINTS) {
-    throw std::runtime_error("控制器配置必须包含 7 维 kp/kd/target_position");
+  arm_dof_ = config_.kp.size();
+  if (arm_dof_ == 0 || config_.kd.size() != arm_dof_ ||
+      config_.target_position.size() != arm_dof_) {
+    throw std::runtime_error("控制器配置必须包含等长且非空的 kp/kd/target_position");
   }
 
-  robot_model_ = robot::createFrankaPanda();
   collision_checker_.initialize(collision_model.string());
+  joint_lower_limits_ = collision_checker_.jointLowerLimits();
+  joint_upper_limits_ = collision_checker_.jointUpperLimits();
+  actuator_limits_ = collision_checker_.actuatorLimits();
+  collision_home_ = collision_checker_.homeConfiguration();
+
+  if (joint_lower_limits_.size() < arm_dof_ || joint_upper_limits_.size() < arm_dof_) {
+    throw std::runtime_error("碰撞模型中的关节数量不足，无法匹配控制器维度");
+  }
+  if (actuator_limits_.size() < arm_dof_) {
+    throw std::runtime_error("碰撞模型中的执行器数量不足，无法匹配控制器维度");
+  }
   initExcitationTrajectory();
 }
 
 void ForceController::initExcitationTrajectory() {
   const std::size_t n_harmonics = 5;
-  Eigen::VectorXd q0(NUM_ARM_JOINTS);
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+  Eigen::VectorXd q0(static_cast<Eigen::Index>(arm_dof_));
+  for (std::size_t i = 0; i < arm_dof_; ++i) {
     q0(static_cast<Eigen::Index>(i)) = config_.target_position[i];
   }
 
   trajectory_ = std::make_unique<trajectory::FourierTrajectory>(
-      NUM_ARM_JOINTS, n_harmonics, trajectory_duration_, q0);
+      arm_dof_, n_harmonics, trajectory_duration_, q0);
 
   double amplitude = 0.15;
   bool valid_trajectory = false;
@@ -141,43 +150,24 @@ void ForceController::initExcitationTrajectory() {
 }
 
 bool ForceController::checkTrajectory(const trajectory::FourierTrajectory &traj) {
-  robot::RobotKinematics kinematics(*robot_model_);
-  const auto &limits = robot_model_->jointLimits();
+  std::vector<double> q_state = collision_home_;
+  if (q_state.size() < arm_dof_) {
+    q_state.resize(arm_dof_, 0.0);
+  }
 
   for (double t = 0.0; t <= trajectory_duration_; t += 0.1) {
     const auto point = traj.evaluate(t);
     const Eigen::VectorXd &q = point.q;
 
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-      if (q(static_cast<Eigen::Index>(i)) < limits[i].q_min ||
-          q(static_cast<Eigen::Index>(i)) > limits[i].q_max) {
+    for (std::size_t i = 0; i < arm_dof_; ++i) {
+      const double q_i = q(static_cast<Eigen::Index>(i));
+      if (q_i < joint_lower_limits_[i] || q_i > joint_upper_limits_[i]) {
         return false;
       }
+      q_state[i] = q_i;
     }
 
-    const auto transforms = kinematics.computeAllTransforms(q);
-    for (const auto &transform : transforms) {
-      if (transform(2, 3) < SAFETY_PLANE_Z) {
-        return false;
-      }
-    }
-
-    if (!transforms.empty()) {
-      const auto &ee = transforms.back();
-      const Eigen::Vector3d p_ee = ee.block<3, 1>(0, 3);
-      const Eigen::Matrix3d r_ee = ee.block<3, 3>(0, 0);
-      const Eigen::Vector3d p_tip =
-          p_ee + r_ee * Eigen::Vector3d(0.0, 0.0, GRIPPER_LENGTH);
-      if (p_tip.z() < SAFETY_PLANE_Z) {
-        return false;
-      }
-    }
-
-    std::vector<double> q_std(NUM_ARM_JOINTS);
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-      q_std[i] = q(static_cast<Eigen::Index>(i));
-    }
-    if (collision_checker_.checkCollision(q_std)) {
+    if (collision_checker_.checkCollision(q_state)) {
       collision_checker_.printCollisions();
       return false;
     }
@@ -188,12 +178,11 @@ bool ForceController::checkTrajectory(const trajectory::FourierTrajectory &traj)
 
 std::vector<double> ForceController::computeTorque(const JointSample &sample,
                                                    double current_time) {
-  if (sample.position.size() < NUM_TOTAL_JOINTS ||
-      sample.velocity.size() < NUM_TOTAL_JOINTS) {
-    throw std::runtime_error("关节状态维度不足，至少需要 9 个关节状态");
+  if (sample.position.size() < arm_dof_ || sample.velocity.size() < arm_dof_) {
+    throw std::runtime_error("关节状态维度不足，无法覆盖当前机械臂的控制关节");
   }
 
-  std::vector<double> torques(NUM_ARM_JOINTS + 1, 0.0);
+  std::vector<double> torques(actuator_limits_.size(), 0.0);
 
   if (!trajectory_started_ && mode_ == ControllerMode::EXCITATION_TRAJECTORY) {
     trajectory_start_time_ = current_time;
@@ -202,7 +191,7 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
   }
 
   if (mode_ == ControllerMode::HOLD_POSITION || trajectory_finished_) {
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+    for (std::size_t i = 0; i < arm_dof_; ++i) {
       const double position_error = config_.target_position[i] - sample.position[i];
       torques[i] = config_.kp[i] * position_error - config_.kd[i] * sample.velocity[i];
     }
@@ -217,7 +206,7 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
             static_cast<double>(total_samples_);
         std::cout << "力矩饱和占比: " << ratio << "%" << std::endl;
       }
-      for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+      for (std::size_t i = 0; i < arm_dof_; ++i) {
         const double position_error =
             config_.target_position[i] - sample.position[i];
         torques[i] =
@@ -226,7 +215,7 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
     }
 
     const auto point = trajectory_->evaluate(trajectory_time);
-    for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
+    for (std::size_t i = 0; i < arm_dof_; ++i) {
       const double q_error = point.q(static_cast<Eigen::Index>(i)) - sample.position[i];
       const double qd_error = point.qd(static_cast<Eigen::Index>(i)) - sample.velocity[i];
       torques[i] = config_.kp[i] * q_error + config_.kd[i] * qd_error;
@@ -241,9 +230,9 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
 
   torque_saturated_ = false;
   ++total_samples_;
-  for (std::size_t i = 0; i < NUM_ARM_JOINTS; ++i) {
-    torques[i] = std::clamp(torques[i], -MAX_TORQUES[i], MAX_TORQUES[i]);
-    if (std::abs(torques[i]) >= MAX_TORQUES[i] * 0.99) {
+  for (std::size_t i = 0; i < arm_dof_; ++i) {
+    torques[i] = std::clamp(torques[i], -actuator_limits_[i], actuator_limits_[i]);
+    if (std::abs(torques[i]) >= actuator_limits_[i] * 0.99) {
       torque_saturated_ = true;
     }
   }
@@ -251,7 +240,6 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
     ++saturated_samples_;
   }
 
-  torques.back() = 0.0;
   return torques;
 }
 

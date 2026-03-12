@@ -32,7 +32,8 @@ class PandaSimulator {
 public:
   PandaSimulator(const PandaSimConfig &config,
                  const std::filesystem::path &scene_path,
-                 const std::filesystem::path &record_file);
+                 const std::filesystem::path &record_file,
+                 std::size_t recorded_dof);
   ~PandaSimulator();
 
   static PandaSimConfig loadConfig(const std::filesystem::path &config_path);
@@ -73,6 +74,7 @@ private:
   bool saturated_{false};
   double simulation_time_{0.0};
   std::size_t record_count_{0};
+  std::size_t recorded_dof_{0};
   static constexpr std::size_t FLUSH_INTERVAL = 1000;
 
   mjvCamera camera_{};

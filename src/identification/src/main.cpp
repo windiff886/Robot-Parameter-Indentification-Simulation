@@ -1,11 +1,13 @@
 #include "identification/data_loader.hpp"
 #include "identification/identification.hpp"
+#include "identification/algorithms.hpp"
 #include "mujoco_panda_dynamics.hpp"
-#include "robot/franka_panda.hpp"
+#include "mujoco_piper_dynamics.hpp"
 
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +24,7 @@ namespace {
 
 struct IdentificationConfig {
   int algorithm = 0;
+  std::string robot = "panda";
   std::string data_file =
       (fs::path(PROJECT_ROOT_DIR) / "data" / "benchmark_data.csv").string();
   std::string output_file =
@@ -34,6 +37,21 @@ struct BenchmarkResult {
   double torque_rmse = 0.0;
   double torque_max_error = 0.0;
   bool success = false;
+};
+
+struct PreparedTrainingData {
+  Eigen::MatrixXd qd_valid;
+  Eigen::VectorXd tau_valid;
+  Eigen::MatrixXd w_armature;
+  Eigen::MatrixXd w_all;
+  std::size_t filtered_outliers = 0;
+};
+
+struct PreparedEvaluationData {
+  Eigen::MatrixXd qd_full;
+  Eigen::VectorXd tau_full;
+  Eigen::MatrixXd w_armature;
+  Eigen::MatrixXd w_all;
 };
 
 std::string trim(const std::string &value) {
@@ -90,6 +108,7 @@ IdentificationConfig loadConfig(const fs::path &config_path) {
   std::string line;
   while (std::getline(file, line)) {
     parseInt(line, "algorithm", config.algorithm);
+    parseString(line, "robot", config.robot);
     parseString(line, "data_file", config.data_file);
     parseString(line, "output_file", config.output_file);
   }
@@ -128,9 +147,26 @@ std::string algorithmName(int algorithm_id) {
     return "ML";
   case 7:
     return "CLOE";
+  case 8:
+    return "NLS_FRICTION";
   default:
     return "OLS";
   }
+}
+
+std::string normalizeRobotType(std::string robot) {
+  std::transform(robot.begin(), robot.end(), robot.begin(),
+                 [](unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  return robot;
+}
+
+std::size_t robotDof(const std::string &robot) {
+  if (robot == "piper") {
+    return 6;
+  }
+  return 7;
 }
 
 std::tm localTime(std::time_t raw_time) {
@@ -141,6 +177,83 @@ std::tm localTime(std::time_t raw_time) {
   localtime_r(&raw_time, &result);
 #endif
   return result;
+}
+
+Eigen::VectorXd flattenTorque(const ExperimentData &data) {
+  Eigen::VectorXd tau(data.n_samples * data.n_dof);
+  for (std::size_t i = 0; i < data.n_samples; ++i) {
+    for (std::size_t j = 0; j < data.n_dof; ++j) {
+      tau(static_cast<Eigen::Index>(i * data.n_dof + j)) = data.tau(i, j);
+    }
+  }
+  return tau;
+}
+
+PreparedTrainingData prepareTrainingData(
+    const Identification &identifier, const ExperimentData &data,
+    const double qdd_threshold,
+    const mujoco_dynamics::MuJoCoParamFlags all_flags,
+    const mujoco_dynamics::MuJoCoParamFlags armature_flags) {
+  std::vector<std::size_t> valid_indices;
+  valid_indices.reserve(data.n_samples);
+
+  for (std::size_t i = 0; i < data.n_samples; ++i) {
+    if (data.qdd.row(static_cast<Eigen::Index>(i)).cwiseAbs().maxCoeff() <
+        qdd_threshold) {
+      valid_indices.push_back(i);
+    }
+  }
+
+  if (valid_indices.empty()) {
+    throw std::runtime_error("No valid samples remaining after filtering outliers!");
+  }
+
+  PreparedTrainingData prepared;
+  prepared.filtered_outliers = data.n_samples - valid_indices.size();
+
+  Eigen::MatrixXd q_valid(valid_indices.size(), data.n_dof);
+  Eigen::MatrixXd qd_valid(valid_indices.size(), data.n_dof);
+  Eigen::MatrixXd qdd_valid(valid_indices.size(), data.n_dof);
+  prepared.tau_valid.resize(static_cast<Eigen::Index>(valid_indices.size() * data.n_dof));
+
+  for (std::size_t k = 0; k < valid_indices.size(); ++k) {
+    const std::size_t idx = valid_indices[k];
+    q_valid.row(static_cast<Eigen::Index>(k)) =
+        data.q.row(static_cast<Eigen::Index>(idx));
+    qd_valid.row(static_cast<Eigen::Index>(k)) =
+        data.qd.row(static_cast<Eigen::Index>(idx));
+    qdd_valid.row(static_cast<Eigen::Index>(k)) =
+        data.qdd.row(static_cast<Eigen::Index>(idx));
+    for (std::size_t j = 0; j < data.n_dof; ++j) {
+      prepared.tau_valid(
+          static_cast<Eigen::Index>(k * data.n_dof + j)) =
+          data.tau(static_cast<Eigen::Index>(idx), static_cast<Eigen::Index>(j));
+    }
+  }
+
+  prepared.qd_valid = std::move(qd_valid);
+  prepared.w_all = identifier.computeObservationMatrix(
+      q_valid.transpose(), prepared.qd_valid.transpose(), qdd_valid.transpose(),
+      all_flags);
+  prepared.w_armature = identifier.computeObservationMatrix(
+      q_valid.transpose(), prepared.qd_valid.transpose(), qdd_valid.transpose(),
+      armature_flags);
+  return prepared;
+}
+
+PreparedEvaluationData prepareEvaluationData(
+    const Identification &identifier, const ExperimentData &data,
+    const mujoco_dynamics::MuJoCoParamFlags all_flags,
+    const mujoco_dynamics::MuJoCoParamFlags armature_flags) {
+  PreparedEvaluationData prepared;
+  prepared.qd_full = data.qd;
+  prepared.tau_full = flattenTorque(data);
+  prepared.w_all = identifier.computeObservationMatrix(
+      data.q.transpose(), data.qd.transpose(), data.qdd.transpose(), all_flags);
+  prepared.w_armature =
+      identifier.computeObservationMatrix(data.q.transpose(), data.qd.transpose(),
+                                          data.qdd.transpose(), armature_flags);
+  return prepared;
 }
 
 void saveResults(const fs::path &output_path, int algorithm_id,
@@ -217,7 +330,14 @@ int main(int argc, char **argv) {
         config.output_file = value;
       } else if (flag == "--algorithm") {
         config.algorithm = std::stoi(value);
+      } else if (flag == "--robot") {
+        config.robot = value;
       }
+    }
+
+    config.robot = normalizeRobotType(config.robot);
+    if (config.robot != "panda" && config.robot != "piper") {
+      throw std::runtime_error("robot 仅支持 panda 或 piper");
     }
 
     if (config.data_file.empty()) {
@@ -225,31 +345,63 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "加载数据: " << config.data_file << std::endl;
-    ExperimentData data = DataLoader::loadCSV(config.data_file, 7);
+    std::cout << "机械臂配置: " << config.robot << std::endl;
+    ExperimentData data = DataLoader::loadCSV(config.data_file, robotDof(config.robot));
     std::cout << "样本数: " << data.n_samples << std::endl;
 
-    auto robot = robot::createFrankaPanda();
-    Identification identifier(std::move(robot));
+    Identification identifier(config.robot);
     identifier.preprocess(data);
 
-    {
-      mujoco_dynamics::MuJoCoPandaDynamics dynamics;
+    if (config.robot == "piper") {
+      mujoco_dynamics::MuJoCoPiperDynamics dynamics;
       double sum_sq_error = 0.0;
       double max_error = 0.0;
-      const std::size_t n_dof = 7;
+      const std::size_t n_dof = data.n_dof;
       for (std::size_t i = 0; i < data.n_samples; ++i) {
-        const Eigen::VectorXd q = data.q.row(i).transpose();
-        const Eigen::VectorXd qd = data.qd.row(i).transpose();
-        const Eigen::VectorXd qdd = data.qdd.row(i).transpose();
+        const Eigen::VectorXd q =
+            data.q.row(static_cast<Eigen::Index>(i)).transpose();
+        const Eigen::VectorXd qd =
+            data.qd.row(static_cast<Eigen::Index>(i)).transpose();
+        const Eigen::VectorXd qdd =
+            data.qdd.row(static_cast<Eigen::Index>(i)).transpose();
         const Eigen::VectorXd tau = dynamics.computeInverseDynamics(q, qd, qdd);
         for (std::size_t j = 0; j < n_dof; ++j) {
-          const double error = tau(static_cast<Eigen::Index>(j)) - data.tau(i, j);
+          const double error =
+              tau(static_cast<Eigen::Index>(j)) -
+              data.tau(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j));
           sum_sq_error += error * error;
           max_error = std::max(max_error, std::abs(error));
         }
       }
-      const double rmse =
-          std::sqrt(sum_sq_error / (static_cast<double>(data.n_samples) * 7.0));
+      const double rmse = std::sqrt(
+          sum_sq_error /
+          (static_cast<double>(data.n_samples) * static_cast<double>(n_dof)));
+      std::cout << "MuJoCo 动力学基准 RMSE: " << rmse << " Nm, Max Error: "
+                << max_error << " Nm" << std::endl;
+    } else {
+      mujoco_dynamics::MuJoCoPandaDynamics dynamics;
+      double sum_sq_error = 0.0;
+      double max_error = 0.0;
+      const std::size_t n_dof = data.n_dof;
+      for (std::size_t i = 0; i < data.n_samples; ++i) {
+        const Eigen::VectorXd q =
+            data.q.row(static_cast<Eigen::Index>(i)).transpose();
+        const Eigen::VectorXd qd =
+            data.qd.row(static_cast<Eigen::Index>(i)).transpose();
+        const Eigen::VectorXd qdd =
+            data.qdd.row(static_cast<Eigen::Index>(i)).transpose();
+        const Eigen::VectorXd tau = dynamics.computeInverseDynamics(q, qd, qdd);
+        for (std::size_t j = 0; j < n_dof; ++j) {
+          const double error =
+              tau(static_cast<Eigen::Index>(j)) -
+              data.tau(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j));
+          sum_sq_error += error * error;
+          max_error = std::max(max_error, std::abs(error));
+        }
+      }
+      const double rmse = std::sqrt(
+          sum_sq_error /
+          (static_cast<double>(data.n_samples) * static_cast<double>(n_dof)));
       std::cout << "MuJoCo 动力学基准 RMSE: " << rmse << " Nm, Max Error: "
                 << max_error << " Nm" << std::endl;
     }
@@ -276,22 +428,31 @@ int main(int argc, char **argv) {
     val_data.qdd = data.qdd.bottomRows(static_cast<Eigen::Index>(n_val));
     val_data.tau = data.tau.bottomRows(static_cast<Eigen::Index>(n_val));
 
-    auto flags = mujoco_dynamics::MuJoCoParamFlags::ARMATURE |
-                 mujoco_dynamics::MuJoCoParamFlags::DAMPING;
-    const Eigen::MatrixXd W_val = identifier.computeObservationMatrix(
-        val_data.q.transpose(), val_data.qd.transpose(), val_data.qdd.transpose(),
-        flags);
+    const auto all_flags = mujoco_dynamics::MuJoCoParamFlags::ARMATURE |
+                           mujoco_dynamics::MuJoCoParamFlags::DAMPING;
+    const auto armature_flags = mujoco_dynamics::MuJoCoParamFlags::ARMATURE;
+    const double qdd_threshold = 10.0;
 
-    Eigen::VectorXd Tau_val(val_data.n_samples * val_data.n_dof);
-    for (std::size_t i = 0; i < val_data.n_samples; ++i) {
-      for (std::size_t j = 0; j < val_data.n_dof; ++j) {
-        Tau_val(static_cast<Eigen::Index>(i * val_data.n_dof + j)) = val_data.tau(i, j);
-      }
-    }
+    std::cout << "Preparing cached observation matrices..." << std::endl;
+    PreparedTrainingData prepared_train = prepareTrainingData(
+        identifier, train_data, qdd_threshold, all_flags, armature_flags);
+    PreparedEvaluationData prepared_val =
+        prepareEvaluationData(identifier, val_data, all_flags, armature_flags);
+
+    std::cout << "Filtered " << prepared_train.filtered_outliers
+              << " outlier samples. "
+              << (prepared_train.tau_valid.size() /
+                  static_cast<Eigen::Index>(train_data.n_dof))
+              << " valid samples remain." << std::endl;
+    std::cout << "Cached W(all) size: " << prepared_train.w_all.rows() << " x "
+              << prepared_train.w_all.cols() << std::endl;
+    std::cout << "Cached W(armature) size: " << prepared_train.w_armature.rows()
+              << " x " << prepared_train.w_armature.cols() << std::endl;
 
     std::vector<std::string> algorithms;
     if (config.algorithm == 0) {
-      algorithms = {"OLS", "WLS", "IRLS", "TLS", "EKF", "ML", "CLOE"};
+      algorithms = {"OLS", "WLS", "IRLS", "TLS", "EKF", "ML", "CLOE",
+                    "NLS_FRICTION"};
     } else {
       algorithms.push_back(algorithmName(config.algorithm));
     }
@@ -301,9 +462,41 @@ int main(int argc, char **argv) {
       BenchmarkResult result;
       result.name = algorithm;
       try {
-        result.beta = identifier.solve(train_data, algorithm, flags);
-        const Eigen::VectorXd Tau_pred = W_val * result.beta;
-        const Eigen::VectorXd residual = Tau_val - Tau_pred;
+        const bool use_nonlinear_friction = algorithm == "NLS_FRICTION";
+        const auto &w_train =
+            use_nonlinear_friction ? prepared_train.w_armature
+                                   : prepared_train.w_all;
+        const auto &w_val =
+            use_nonlinear_friction ? prepared_val.w_armature : prepared_val.w_all;
+
+        auto solver = identification::createAlgorithm(
+            algorithm, static_cast<int>(train_data.n_dof));
+        if (!solver) {
+          std::cout << "WARNING: " << algorithm
+                    << " algorithm is not fully supported with MuJoCoRegressor. "
+                    << "Falling back to OLS." << std::endl;
+          solver = identification::createAlgorithm(
+              "OLS", static_cast<int>(train_data.n_dof));
+        }
+
+        if (auto *nonlinear_solver =
+                dynamic_cast<identification::NonlinearFrictionLM *>(solver.get())) {
+          nonlinear_solver->setVelocityData(prepared_train.qd_valid);
+        }
+
+        std::cout << "Solving using " << algorithm << "..." << std::endl;
+        result.beta = solver->solve(w_train, prepared_train.tau_valid);
+
+        Eigen::VectorXd Tau_pred;
+        if (use_nonlinear_friction) {
+          Tau_pred = identification::NonlinearFrictionLM::predictTorques(
+              w_val, prepared_val.qd_full, result.beta,
+              static_cast<int>(val_data.n_dof));
+        } else {
+          Tau_pred = w_val * result.beta;
+        }
+
+        const Eigen::VectorXd residual = prepared_val.tau_full - Tau_pred;
         result.torque_rmse = std::sqrt(residual.squaredNorm() /
                                        static_cast<double>(residual.size()));
         result.torque_max_error = residual.cwiseAbs().maxCoeff();

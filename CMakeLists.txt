@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(MSVC)
   add_compile_options(/W4 /permissive-)
 else()
@@ -14,6 +18,7 @@ endif()
 
 find_package(Eigen3 REQUIRED)
 find_package(glfw3 REQUIRED)
+find_package(OpenMP)
 
 set(MUJOCO_DIR_ENV $ENV{MUJOCO_DIR})
 
@@ -93,6 +98,8 @@ add_library(identification_core
   src/identification/src/robot/regressor.cpp
   src/identification/src/robot/mujoco_panda_dynamics.cpp
   src/identification/src/robot/mujoco_regressor.cpp
+  src/identification/src/robot/mujoco_piper_dynamics.cpp
+  src/identification/src/robot/mujoco_piper_regressor.cpp
 )
 target_include_directories(identification_core
   PUBLIC
@@ -105,6 +112,10 @@ target_link_libraries(identification_core
     Eigen3::Eigen
     ${MUJOCO_LIB}
 )
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(identification_core PUBLIC OpenMP::OpenMP_CXX)
+  target_compile_definitions(identification_core PUBLIC IDENTIFICATION_USE_OPENMP=1)
+endif()
 target_compile_definitions(identification_core
   PUBLIC PROJECT_ROOT_DIR="${PROJECT_ROOT_DIR}"
 )

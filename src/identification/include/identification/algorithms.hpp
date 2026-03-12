@@ -129,6 +129,30 @@ public:
                         const Eigen::VectorXd &Tau_meas) override;
 };
 
+class NonlinearFrictionLM : public IdentificationAlgorithm {
+public:
+  explicit NonlinearFrictionLM(int dof, int multi_start = 4);
+
+  Eigen::VectorXd solve(const Eigen::MatrixXd &W,
+                        const Eigen::VectorXd &Tau_meas) override;
+
+  void setVelocityData(const Eigen::MatrixXd &qd_meas);
+
+  static std::size_t frictionParameterCount(int dof) {
+    return static_cast<std::size_t>(6 * dof);
+  }
+
+  static Eigen::VectorXd predictTorques(const Eigen::MatrixXd &W_base,
+                                        const Eigen::MatrixXd &qd_meas,
+                                        const Eigen::VectorXd &params,
+                                        int dof);
+
+private:
+  int dof_;
+  int multi_start_;
+  Eigen::MatrixXd qd_meas_;
+};
+
 // Factory
 std::unique_ptr<IdentificationAlgorithm>
 createAlgorithm(const std::string &type, int dof = 7);
