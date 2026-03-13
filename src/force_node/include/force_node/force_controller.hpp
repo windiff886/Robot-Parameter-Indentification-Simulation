@@ -32,6 +32,15 @@ struct JointSample {
   std::vector<double> effort;
 };
 
+struct ControlCommand {
+  std::vector<double> torque;
+  std::vector<double> desired_position;
+  std::vector<double> desired_velocity;
+  std::vector<double> kp;
+  std::vector<double> kd;
+  bool saturated{false};
+};
+
 class ForceController {
 public:
   explicit ForceController(const ForceControllerConfig &config,
@@ -40,6 +49,7 @@ public:
   static ForceControllerConfig
   loadConfig(const std::filesystem::path &config_path);
 
+  ControlCommand computeCommand(const JointSample &sample, double current_time);
   std::vector<double> computeTorque(const JointSample &sample,
                                     double current_time);
 

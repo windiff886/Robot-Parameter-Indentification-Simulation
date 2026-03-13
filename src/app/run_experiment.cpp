@@ -1,8 +1,13 @@
+#include "app/experiment_backend.hpp"
+#include "app/experiment_recorder.hpp"
+#include "app/piper_hardware_backend.hpp"
+#include "app/simulation_backend.hpp"
 #include "force_node/force_controller.hpp"
-#include "sim_com_node/panda_simulator.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -41,10 +46,12 @@ fs::path defaultRecordFile() {
 
 struct ExperimentConfig {
   std::string robot = "panda";
+  std::string backend = "sim";
   fs::path controller_config;
   fs::path sim_config;
   fs::path scene_path;
   fs::path collision_model;
+  fs::path hardware_config;
 };
 
 std::string trimCopy(const std::string &input) {
@@ -94,7 +101,9 @@ fs::path resolveRepoPath(const fs::path &path_value) {
 ExperimentConfig defaultExperimentConfigForRobot(const std::string &robot) {
   ExperimentConfig config;
   config.robot = robot;
+  config.backend = "sim";
   config.sim_config = repoRoot() / "config" / "panda_sim_node.yaml";
+  config.hardware_config = repoRoot() / "config" / "piper_real_experiment.yaml";
 
   if (robot == "piper") {
     config.controller_config =
@@ -127,6 +136,8 @@ ExperimentConfig loadExperimentConfig(const fs::path &config_path) {
       }
       if (const auto robot = parseYamlString(trimmed, "robot")) {
         parsed.robot = *robot;
+      } else if (const auto backend = parseYamlString(trimmed, "backend")) {
+        parsed.backend = *backend;
       } else if (const auto controller =
                      parseYamlString(trimmed, "controller_config")) {
         parsed.controller_config = resolveRepoPath(*controller);
@@ -137,6 +148,9 @@ ExperimentConfig loadExperimentConfig(const fs::path &config_path) {
       } else if (const auto collision =
                      parseYamlString(trimmed, "collision_model")) {
         parsed.collision_model = resolveRepoPath(*collision);
+      } else if (const auto hardware =
+                     parseYamlString(trimmed, "hardware_config")) {
+        parsed.hardware_config = resolveRepoPath(*hardware);
       }
     }
   }
@@ -153,6 +167,12 @@ ExperimentConfig loadExperimentConfig(const fs::path &config_path) {
   }
   if (!parsed.collision_model.empty()) {
     resolved.collision_model = parsed.collision_model;
+  }
+  if (!parsed.backend.empty()) {
+    resolved.backend = parsed.backend;
+  }
+  if (!parsed.hardware_config.empty()) {
+    resolved.hardware_config = parsed.hardware_config;
   }
   return resolved;
 }
@@ -184,20 +204,33 @@ int main(int argc, char **argv) {
     const bool headless = hasFlag(argc, argv, "--headless");
 
     auto controller_config = force_node::ForceController::loadConfig(force_config);
-    auto sim_config_loaded = sim_com_node::PandaSimulator::loadConfig(sim_config);
-    sim_config_loaded.enable_viewer = !headless && sim_config_loaded.enable_viewer;
-
     force_node::ForceController controller(controller_config, collision_model);
-    sim_com_node::PandaSimulator simulator(sim_config_loaded, scene_path,
-                                           output_csv, controller.armDOF());
+    app::ExperimentRecorder recorder(output_csv, controller.armDOF());
+    std::unique_ptr<app::ExperimentBackend> backend;
+
+    if (experiment_config.backend == "piper_real") {
+      if (experiment_config.robot != "piper") {
+        throw std::runtime_error("piper_real 后端仅支持 piper 机械臂");
+      }
+      backend = std::make_unique<app::PiperHardwareBackend>(
+          repoRoot() / "src" / "app" / "piper_backend_bridge.py",
+          experiment_config.hardware_config, 1.0 / controller.controlRateHz());
+    } else {
+      auto sim_config_loaded = sim_com_node::PandaSimulator::loadConfig(sim_config);
+      sim_config_loaded.enable_viewer =
+          !headless && sim_config_loaded.enable_viewer;
+      backend = std::make_unique<app::SimulationBackend>(
+          sim_config_loaded, scene_path, controller.armDOF());
+    }
 
     const double end_time = controller.trajectoryDuration() + 2.0;
-    while (simulator.simulationTime() < end_time) {
-      const auto state = simulator.currentState();
+    auto state = backend->initialize();
+    while (backend->simulationTime() < end_time) {
       force_node::JointSample sample{state.position, state.velocity, state.effort};
-      const auto torque =
-          controller.computeTorque(sample, simulator.simulationTime());
-      simulator.step(torque, controller.isTorqueSaturated());
+      const auto command =
+          controller.computeCommand(sample, backend->simulationTime());
+      state = backend->step(command);
+      recorder.record(backend->simulationTime(), state, command);
     }
 
     std::cout << "实验完成，数据已保存到: " << output_csv << std::endl;

@@ -176,13 +176,18 @@ bool ForceController::checkTrajectory(const trajectory::FourierTrajectory &traj)
   return true;
 }
 
-std::vector<double> ForceController::computeTorque(const JointSample &sample,
-                                                   double current_time) {
+ControlCommand ForceController::computeCommand(const JointSample &sample,
+                                               double current_time) {
   if (sample.position.size() < arm_dof_ || sample.velocity.size() < arm_dof_) {
     throw std::runtime_error("关节状态维度不足，无法覆盖当前机械臂的控制关节");
   }
 
-  std::vector<double> torques(actuator_limits_.size(), 0.0);
+  ControlCommand command;
+  command.torque.assign(actuator_limits_.size(), 0.0);
+  command.desired_position.assign(arm_dof_, 0.0);
+  command.desired_velocity.assign(arm_dof_, 0.0);
+  command.kp = config_.kp;
+  command.kd = config_.kd;
 
   if (!trajectory_started_ && mode_ == ControllerMode::EXCITATION_TRAJECTORY) {
     trajectory_start_time_ = current_time;
@@ -192,8 +197,10 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
 
   if (mode_ == ControllerMode::HOLD_POSITION || trajectory_finished_) {
     for (std::size_t i = 0; i < arm_dof_; ++i) {
+      command.desired_position[i] = config_.target_position[i];
       const double position_error = config_.target_position[i] - sample.position[i];
-      torques[i] = config_.kp[i] * position_error - config_.kd[i] * sample.velocity[i];
+      command.torque[i] =
+          config_.kp[i] * position_error - config_.kd[i] * sample.velocity[i];
     }
   } else {
     const double trajectory_time = current_time - trajectory_start_time_;
@@ -207,32 +214,38 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
         std::cout << "力矩饱和占比: " << ratio << "%" << std::endl;
       }
       for (std::size_t i = 0; i < arm_dof_; ++i) {
+        command.desired_position[i] = config_.target_position[i];
         const double position_error =
             config_.target_position[i] - sample.position[i];
-        torques[i] =
+        command.torque[i] =
             config_.kp[i] * position_error - config_.kd[i] * sample.velocity[i];
       }
-    }
+    } else {
+      const auto point = trajectory_->evaluate(trajectory_time);
+      for (std::size_t i = 0; i < arm_dof_; ++i) {
+        command.desired_position[i] = point.q(static_cast<Eigen::Index>(i));
+        command.desired_velocity[i] = point.qd(static_cast<Eigen::Index>(i));
+        const double q_error =
+            point.q(static_cast<Eigen::Index>(i)) - sample.position[i];
+        const double qd_error =
+            point.qd(static_cast<Eigen::Index>(i)) - sample.velocity[i];
+        command.torque[i] = config_.kp[i] * q_error + config_.kd[i] * qd_error;
+      }
 
-    const auto point = trajectory_->evaluate(trajectory_time);
-    for (std::size_t i = 0; i < arm_dof_; ++i) {
-      const double q_error = point.q(static_cast<Eigen::Index>(i)) - sample.position[i];
-      const double qd_error = point.qd(static_cast<Eigen::Index>(i)) - sample.velocity[i];
-      torques[i] = config_.kp[i] * q_error + config_.kd[i] * qd_error;
-    }
-
-    if (trajectory_time - last_print_time_ >= 2.0) {
-      std::cout << "轨迹进度: " << trajectory_time << " / "
-                << trajectory_duration_ << " s" << std::endl;
-      last_print_time_ = trajectory_time;
+      if (trajectory_time - last_print_time_ >= 2.0) {
+        std::cout << "轨迹进度: " << trajectory_time << " / "
+                  << trajectory_duration_ << " s" << std::endl;
+        last_print_time_ = trajectory_time;
+      }
     }
   }
 
   torque_saturated_ = false;
   ++total_samples_;
   for (std::size_t i = 0; i < arm_dof_; ++i) {
-    torques[i] = std::clamp(torques[i], -actuator_limits_[i], actuator_limits_[i]);
-    if (std::abs(torques[i]) >= actuator_limits_[i] * 0.99) {
+    command.torque[i] = std::clamp(command.torque[i], -actuator_limits_[i],
+                                   actuator_limits_[i]);
+    if (std::abs(command.torque[i]) >= actuator_limits_[i] * 0.99) {
       torque_saturated_ = true;
     }
   }
@@ -240,7 +253,13 @@ std::vector<double> ForceController::computeTorque(const JointSample &sample,
     ++saturated_samples_;
   }
 
-  return torques;
+  command.saturated = torque_saturated_;
+  return command;
+}
+
+std::vector<double> ForceController::computeTorque(const JointSample &sample,
+                                                   double current_time) {
+  return computeCommand(sample, current_time).torque;
 }
 
 } // namespace force_node

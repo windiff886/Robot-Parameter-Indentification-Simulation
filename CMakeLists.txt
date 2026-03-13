@@ -122,6 +122,13 @@ target_compile_definitions(identification_core
 
 add_executable(run_experiment
   src/app/run_experiment.cpp
+  src/app/experiment_recorder.cpp
+  src/app/simulation_backend.cpp
+  src/app/piper_hardware_backend.cpp
+)
+target_include_directories(run_experiment
+  PRIVATE
+    src
 )
 target_link_libraries(run_experiment
   PRIVATE

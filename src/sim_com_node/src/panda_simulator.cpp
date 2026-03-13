@@ -156,7 +156,9 @@ PandaSimulator::PandaSimulator(const PandaSimConfig &config,
     throw std::runtime_error("记录自由度配置非法，超出当前模型可用关节数");
   }
 
-  startDataRecording(record_file);
+  if (!record_file.empty()) {
+    startDataRecording(record_file);
+  }
   if (config_.enable_viewer) {
     startViewer();
   }
