@@ -112,19 +112,19 @@ PandaSimulator::PandaSimulator(const PandaSimConfig &config,
                                std::size_t recorded_dof)
     : config_(config), recorded_dof_(recorded_dof) {
   if (!fs::exists(scene_path)) {
-    throw std::runtime_error("MuJoCo 场景文件不存在: " + scene_path.string());
+    throw std::runtime_error("MuJoCo scene file does not exist: " + scene_path.string());
   }
 
   char error[512];
   model_.reset(mj_loadXML(scene_path.string().c_str(), nullptr, error,
                           sizeof(error)));
   if (!model_) {
-    throw std::runtime_error("MuJoCo 模型加载失败: " + std::string(error));
+    throw std::runtime_error("Failed to load MuJoCo model: " + std::string(error));
   }
 
   data_.reset(mj_makeData(model_.get()));
   if (!data_) {
-    throw std::runtime_error("MuJoCo 数据结构分配失败");
+    throw std::runtime_error("Failed to allocate MuJoCo data structure");
   }
 
   if (config_.simulation_rate_hz > 0.0) {
@@ -150,10 +150,10 @@ PandaSimulator::PandaSimulator(const PandaSimConfig &config,
   }
 
   if (joint_indices_.empty()) {
-    throw std::runtime_error("未在模型中找到可用关节");
+    throw std::runtime_error("No available joints found in model");
   }
   if (recorded_dof_ == 0 || recorded_dof_ > joint_indices_.size()) {
-    throw std::runtime_error("记录自由度配置非法，超出当前模型可用关节数");
+    throw std::runtime_error("Invalid recorded DOF configuration: exceeds available joints in model");
   }
 
   if (!record_file.empty()) {
@@ -222,7 +222,7 @@ void PandaSimulator::startDataRecording(const std::filesystem::path &record_file
 
   data_file_.open(record_file);
   if (!data_file_) {
-    throw std::runtime_error("无法创建数据文件: " + record_file.string());
+    throw std::runtime_error("Failed to create data file: " + record_file.string());
   }
 
   data_file_ << "time";
@@ -371,14 +371,14 @@ void PandaSimulator::stopViewer() {
 void PandaSimulator::renderLoop() {
   glfwSetErrorCallback(PandaSimulator::glfwErrorCallback);
   if (!glfwInit()) {
-    std::cerr << "GLFW 初始化失败，跳过 viewer" << std::endl;
+    std::cerr << "Failed to initialize GLFW, skipping viewer" << std::endl;
     viewer_running_ = false;
     return;
   }
 
   window_ = glfwCreateWindow(1280, 720, "Panda MuJoCo Viewer", nullptr, nullptr);
   if (!window_) {
-    std::cerr << "GLFW 窗口创建失败，跳过 viewer" << std::endl;
+    std::cerr << "Failed to create GLFW window, skipping viewer" << std::endl;
     glfwTerminate();
     viewer_running_ = false;
     return;

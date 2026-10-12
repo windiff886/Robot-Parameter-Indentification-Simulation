@@ -58,16 +58,16 @@ struct StandardInertialParameters {
 };
 
 /**
- * @brief 额外动力学参数类型标志
+ * @brief Extra dynamics parameter type flags
  *
- * 用于控制回归矩阵中包含哪些额外参数。
- * 这些标志可以组合使用。
+ * Controls which extra parameters are included in the regressor matrix.
+ * Flags can be combined with bitwise OR.
  */
 enum class DynamicsParamFlags : unsigned int {
   NONE = 0,
-  ARMATURE = 1 << 0, ///< 电机反映惯量 (MuJoCo armature)
-  DAMPING = 1 << 1,  ///< 粘性阻尼 (MuJoCo damping, 符号为负)
-  FRICTION = 1 << 2, ///< 摩擦 (Fv, Fc)
+  ARMATURE = 1 << 0, ///< Rotor reflected inertia (MuJoCo armature)
+  DAMPING = 1 << 1,  ///< Viscous damping (MuJoCo damping, negative sign)
+  FRICTION = 1 << 2, ///< Friction (Fv, Fc)
   ALL = ARMATURE | DAMPING | FRICTION
 };
 
@@ -99,16 +99,16 @@ inline bool hasFlag(DynamicsParamFlags flags, DynamicsParamFlags test) {
  *   N : number of joints
  *   M : number of parameters
  *
- * 参数向量 β 的结构:
- *   [惯性参数 (10*N)] + [armature (N)] + [damping (N)] + [friction (2*N)]
+ * Parameter vector beta structure:
+ *   [inertial parameters (10*N)] + [armature (N)] + [damping (N)] + [friction (2*N)]
  *
- * MuJoCo 动力学方程:
+ * MuJoCo dynamics equation:
  *   (M + diag(armature)) * q̈ + C*q̇ + G = τ + damping * q̇
  *
- * 整理为回归形式:
+ * In regressor form:
  *   τ = M*q̈ + C*q̇ + G + armature*q̈ - damping*q̇
  *
- * 注意: damping 项符号为负，因为 MuJoCo 的阻尼是被动项（帮助驱动器）
+ * Note: damping has negative sign because damping in MuJoCo is a passive term (helping actuators)
  */
 class Regressor {
 public:
@@ -121,13 +121,13 @@ public:
 
   /**
    * @brief Compute full parameter vector β from robot model
-   * @param flags 额外参数标志 (ARMATURE, DAMPING, FRICTION)
+   * @param flags Extra parameter flags (ARMATURE, DAMPING, FRICTION)
    * @return Parameter vector β
    */
   VectorXd computeParameterVector(
       DynamicsParamFlags flags = DynamicsParamFlags::FRICTION) const;
 
-  // 向后兼容的重载
+  // Backward-compatible overload
   VectorXd computeParameterVector(bool include_friction) const {
     return computeParameterVector(include_friction
                                       ? DynamicsParamFlags::FRICTION
@@ -143,11 +143,11 @@ public:
 
   /**
    * @brief Get total number of parameters
-   * @param flags 额外参数标志
+   * @param flags Extra parameter flags
    */
   std::size_t numParameters(DynamicsParamFlags flags) const;
 
-  // 向后兼容的重载
+  // Backward-compatible overload
   std::size_t numParameters(bool include_friction = true) const {
     return numParameters(include_friction ? DynamicsParamFlags::FRICTION
                                           : DynamicsParamFlags::NONE);
@@ -160,14 +160,14 @@ public:
    * @param q Joint angles
    * @param qd Joint velocities
    * @param qdd Joint accelerations
-   * @param flags 额外参数标志
+   * @param flags Extra parameter flags
    * @return Regressor matrix Y such that τ = Y * β
    */
   MatrixXd computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
                                   const VectorXd &qdd,
                                   DynamicsParamFlags flags) const;
 
-  // 向后兼容的重载
+  // Backward-compatible overload
   MatrixXd computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
                                   const VectorXd &qdd,
                                   bool include_friction) const {
@@ -186,14 +186,14 @@ public:
    * @param Q Matrix of joint angles (N x K)
    * @param Qd Matrix of joint velocities (N x K)
    * @param Qdd Matrix of joint accelerations (N x K)
-   * @param flags 额外参数标志
+   * @param flags Extra parameter flags
    * @return Observation matrix W (N*K x M)
    */
   MatrixXd computeObservationMatrix(const MatrixXd &Q, const MatrixXd &Qd,
                                     const MatrixXd &Qdd,
                                     DynamicsParamFlags flags) const;
 
-  // 向后兼容的重载
+  // Backward-compatible overload
   MatrixXd computeObservationMatrix(const MatrixXd &Q, const MatrixXd &Qd,
                                     const MatrixXd &Qdd,
                                     bool include_friction) const {

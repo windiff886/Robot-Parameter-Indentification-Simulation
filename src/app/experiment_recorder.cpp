@@ -17,7 +17,7 @@ ExperimentRecorder::ExperimentRecorder(const std::filesystem::path &output_csv,
   }
   file_.open(output_csv);
   if (!file_) {
-    throw std::runtime_error("无法创建实验记录文件: " + output_csv.string());
+    throw std::runtime_error("Failed to create experiment record file: " + output_csv.string());
   }
 
   file_ << "time";

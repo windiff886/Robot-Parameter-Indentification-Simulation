@@ -17,11 +17,11 @@ from piper_real.runner import RealExperimentRunner
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="运行 Piper 真机实验")
+    parser = argparse.ArgumentParser(description="Run Piper real robot experiment")
     parser.add_argument(
         "--config",
         default=str(REPO_ROOT / "config" / "piper_real_experiment.yaml"),
-        help="真机实验配置文件路径",
+        help="Path to real robot experiment configuration file",
     )
     return parser.parse_args()
 
@@ -31,7 +31,7 @@ def main() -> int:
     config = load_real_experiment_config(Path(args.config), repo_root=REPO_ROOT)
     runner = RealExperimentRunner(config)
     runner.run()
-    print(f"真机实验完成，数据已保存到: {config.output_csv}")
+    print(f"Real robot experiment completed. Data saved to: {config.output_csv}")
     return 0
 
 

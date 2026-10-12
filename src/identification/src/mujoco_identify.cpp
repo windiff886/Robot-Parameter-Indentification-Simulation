@@ -1,9 +1,9 @@
 /**
  * @file mujoco_identify.cpp
- * @brief 使用 MuJoCoRegressor 进行参数辨识
+ * @brief Parameter identification using MuJoCoRegressor
  *
- * 该程序使用与 MuJoCo 一致的坐标系和运动学，
- * 确保辨识结果可以正确预测 MuJoCo 仿真的扭矩。
+ * This program uses coordinate frames and kinematics consistent with MuJoCo,
+ * ensuring identification results accurately predict MuJoCo simulation torques.
  */
 
 #include "identification/algorithms.hpp"
@@ -20,7 +20,7 @@ using namespace mujoco_dynamics;
 void printIdentifiedParams(const Eigen::VectorXd &theta,
                            const std::vector<std::string> &names) {
   (void)names;
-  std::cout << "\n[辨识结果]\n";
+  std::cout << "\n[Identification Results]\n";
 
   const char *body_names[] = {"link1", "link2", "link3", "link4",
                               "link5", "link6", "link7", "hand"};
@@ -56,10 +56,10 @@ void printIdentifiedParams(const Eigen::VectorXd &theta,
 
 int main(int argc, char **argv) {
   std::cout << std::string(80, '=') << "\n";
-  std::cout << "  MuJoCo 参数辨识程序\n";
+  std::cout << "  MuJoCo Parameter Identification Program\n";
   std::cout << std::string(80, '=') << "\n";
 
-  // 默认数据文件
+  // Default data file
   std::string data_file =
       (std::filesystem::path(PROJECT_ROOT_DIR) / "data" / "benchmark_data.csv")
           .string();
@@ -67,20 +67,20 @@ int main(int argc, char **argv) {
     data_file = argv[1];
   }
 
-  // 加载数据
+  // Load data
   DataLoader loader;
   ExperimentData data = loader.loadCSV(data_file, 7);
-  std::cout << "\n加载样本数: " << data.n_samples << "\n";
+  std::cout << "\nLoaded sample count: " << data.n_samples << "\n";
 
-  // 创建回归矩阵计算器
+  // Create regressor matrix computer
   MuJoCoRegressor regressor;
   MuJoCoPandaDynamics dynamics;
 
   auto names = regressor.getParameterNames(MuJoCoParamFlags::ALL);
   std::size_t num_params = regressor.numParameters(MuJoCoParamFlags::ALL);
-  std::cout << "参数数量: " << num_params << "\n";
+  std::cout << "Number of parameters: " << num_params << "\n";
 
-  // 过滤异常样本
+  // Filter anomalous samples
   const double qdd_threshold = 10.0;
   std::vector<std::size_t> valid_indices;
   valid_indices.reserve(data.n_samples);
@@ -90,15 +90,15 @@ int main(int argc, char **argv) {
       valid_indices.push_back(i);
     }
   }
-  std::cout << "有效样本数: " << valid_indices.size() << " (过滤了 "
-            << (data.n_samples - valid_indices.size()) << " 个异常样本)\n";
+  std::cout << "Valid sample count: " << valid_indices.size() << " (filtered "
+            << (data.n_samples - valid_indices.size()) << " anomalous samples)\n";
 
-  // 构建观测矩阵 W 和扭矩向量 Tau
+  // Build observation matrix W and torque vector Tau
   std::size_t K = valid_indices.size();
   Eigen::MatrixXd W(7 * K, num_params);
   Eigen::VectorXd Tau(7 * K);
 
-  std::cout << "构建观测矩阵...\n";
+  std::cout << "Building observation matrix...\n";
   for (std::size_t k = 0; k < K; ++k) {
     std::size_t idx = valid_indices[k];
     Eigen::VectorXd q = data.q.row(idx).transpose();
@@ -113,19 +113,19 @@ int main(int argc, char **argv) {
       Tau(k * 7 + j) = data.tau(idx, j);
     }
   }
-  std::cout << "W 大小: " << W.rows() << " x " << W.cols() << "\n";
+  std::cout << "W size: " << W.rows() << " x " << W.cols() << "\n";
 
-  // 使用 OLS 求解
-  std::cout << "\n使用 OLS 求解...\n";
+  // Solve using OLS
+  std::cout << "\nSolving with OLS...\n";
   auto solver = identification::createAlgorithm("OLS", 7);
   Eigen::VectorXd theta_identified = solver->solve(W, Tau);
 
-  // 打印结果
+  // Print results
   printIdentifiedParams(theta_identified, names);
 
-  // 与 Ground Truth 对比
+  // Compare with Ground Truth
   std::cout << "\n" << std::string(80, '-') << "\n";
-  std::cout << "  与 Ground Truth 对比\n";
+  std::cout << "  Comparison with Ground Truth\n";
   std::cout << std::string(80, '-') << "\n";
 
   Eigen::VectorXd theta_true =
@@ -133,9 +133,9 @@ int main(int argc, char **argv) {
   Eigen::VectorXd param_error = theta_identified - theta_true;
 
   double param_rmse = std::sqrt(param_error.squaredNorm() / num_params);
-  std::cout << "参数 RMSE: " << param_rmse << "\n";
+  std::cout << "Parameter RMSE: " << param_rmse << "\n";
 
-  // 计算扭矩误差
+  // Compute torque prediction error
   double torque_sq_error = 0.0;
   std::size_t test_count = std::min(K, (std::size_t)1000);
   for (std::size_t k = 0; k < test_count; ++k) {
@@ -145,9 +145,9 @@ int main(int argc, char **argv) {
     torque_sq_error += (tau_pred - tau_meas).squaredNorm();
   }
   double torque_rmse = std::sqrt(torque_sq_error / (test_count * 7));
-  std::cout << "扭矩预测 RMSE: " << torque_rmse << " Nm\n";
+  std::cout << "Torque prediction RMSE: " << torque_rmse << " Nm\n";
 
-  // 与 Dynamics 预测对比
+  // Compare with Dynamics prediction
   double dynamics_sq_error = 0.0;
   for (std::size_t k = 0; k < test_count; ++k) {
     std::size_t idx = valid_indices[k];
@@ -160,14 +160,14 @@ int main(int argc, char **argv) {
     dynamics_sq_error += (tau_dyn - tau_meas).squaredNorm();
   }
   double dynamics_rmse = std::sqrt(dynamics_sq_error / (test_count * 7));
-  std::cout << "MuJoCoPandaDynamics 扭矩 RMSE (基准): " << dynamics_rmse
+  std::cout << "MuJoCoPandaDynamics torque RMSE (baseline): " << dynamics_rmse
             << " Nm\n";
 
   std::cout << "\n" << std::string(80, '=') << "\n";
   if (torque_rmse < dynamics_rmse * 1.5) {
-    std::cout << "  [OK] 辨识成功！\n";
+    std::cout << "  [OK] Identification succeeded!\n";
   } else {
-    std::cout << "  [WARNING] 辨识结果扭矩误差较大\n";
+    std::cout << "  [WARNING] High torque residual in identification results\n";
   }
   std::cout << std::string(80, '=') << "\n";
 

@@ -1,9 +1,9 @@
 /**
  * @file mujoco_regressor.hpp
- * @brief 基于 MuJoCo 运动学的回归矩阵计算
+ * @brief Regressor matrix computation based on MuJoCo kinematics
  *
- * 使用 MuJoCo 的 Body-Local 坐标系和变换方式计算回归矩阵，
- * 确保辨识结果与 MuJoCo 仿真数据一致。
+ * Computes regressor matrix using MuJoCo Body-Local frames and transformations,
+ * ensuring identification results align with MuJoCo simulation data.
  */
 
 #pragma once
@@ -15,12 +15,12 @@
 namespace mujoco_dynamics {
 
 /**
- * @brief 额外动力学参数类型标志
+ * @brief Extra dynamics parameter type flags
  */
 enum class MuJoCoParamFlags : unsigned int {
   NONE = 0,
-  ARMATURE = 1 << 0, ///< 电机反映惯量
-  DAMPING = 1 << 1,  ///< 粘性阻尼 (符号为负)
+  ARMATURE = 1 << 0, ///< Rotor reflected inertia
+  DAMPING = 1 << 1,  ///< Viscous damping (negative sign)
   ALL = ARMATURE | DAMPING
 };
 
@@ -39,26 +39,26 @@ inline bool hasFlag(MuJoCoParamFlags flags, MuJoCoParamFlags test) {
 }
 
 /**
- * @brief MuJoCo 标准惯性参数结构
+ * @brief MuJoCo standard inertial parameter structure
  *
- * 每个 Body 的参数向量: [m, mx, my, mz, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
- * - m: 质量
- * - mx, my, mz: 质心位置的一阶矩 (m * cx, m * cy, m * cz)
- * - Ixx, ..., Izz: 在 Body 坐标系原点的惯量张量
+ * Parameter vector for each body: [m, mx, my, mz, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
+ * - m: mass
+ * - mx, my, mz: first moments of mass (m * cx, m * cy, m * cz)
+ * - Ixx, ..., Izz: inertia tensor defined at body origin
  */
 struct MuJoCoInertialParams {
   static constexpr std::size_t PARAMS_PER_BODY = 10;
 
-  double m;   ///< 质量
-  double mx;  ///< 一阶矩 x
-  double my;  ///< 一阶矩 y
-  double mz;  ///< 一阶矩 z
-  double Ixx; ///< 惯量张量 xx
-  double Ixy; ///< 惯量张量 xy
-  double Ixz; ///< 惯量张量 xz
-  double Iyy; ///< 惯量张量 yy
-  double Iyz; ///< 惯量张量 yz
-  double Izz; ///< 惯量张量 zz
+  double m;   ///< Mass
+  double mx;  ///< First moment x
+  double my;  ///< First moment y
+  double mz;  ///< First moment z
+  double Ixx; ///< Inertia tensor xx
+  double Ixy; ///< Inertia tensor xy
+  double Ixz; ///< Inertia tensor xz
+  double Iyy; ///< Inertia tensor yy
+  double Iyz; ///< Inertia tensor yz
+  double Izz; ///< Inertia tensor zz
 
   Eigen::Matrix<double, 10, 1> toVector() const {
     Eigen::Matrix<double, 10, 1> v;
@@ -67,20 +67,20 @@ struct MuJoCoInertialParams {
   }
 
   /**
-   * @brief 从 MuJoCoBody 创建标准惯性参数
+   * @brief Create standard inertial parameters from MuJoCoBody
    *
-   * 将质心处定义的惯量通过平行轴定理转换到 Body 坐标系原点
+   * Converts inertia tensor at COM to body origin via parallel axis theorem
    */
   static MuJoCoInertialParams fromMuJoCoBody(const MuJoCoBody &body);
 };
 
 /**
- * @brief 基于 MuJoCo 运动学的回归矩阵计算类
+ * @brief Regressor matrix computation class based on MuJoCo kinematics
  *
- * 使用与 MuJoCoPandaDynamics 完全一致的运动学计算方式，
- * 确保回归矩阵 Y 满足: τ = Y * θ
+ * Uses kinematics calculation identical to MuJoCoPandaDynamics,
+ * ensuring regressor matrix Y satisfies: tau = Y * theta
  *
- * 其中 θ 是 MuJoCo Body 坐标系中定义的惯性参数向量。
+ * where theta is the inertial parameter vector defined in MuJoCo body frames.
  */
 class MuJoCoRegressor {
 public:
@@ -96,30 +96,30 @@ public:
 
   MuJoCoRegressor();
 
-  // ========== 参数向量 ==========
+  // ========== Parameter Vector ==========
 
   /**
-   * @brief 获取 Ground Truth 参数向量 (用于验证)
-   * @param flags 额外参数标志
+   * @brief Get Ground Truth parameter vector (for validation)
+   * @param flags Extra parameter flags
    */
   VectorXd
   computeParameterVector(MuJoCoParamFlags flags = MuJoCoParamFlags::ALL) const;
 
   /**
-   * @brief 获取参数数量
+   * @brief Get parameter count
    */
   std::size_t
   numParameters(MuJoCoParamFlags flags = MuJoCoParamFlags::ALL) const;
 
-  // ========== 回归矩阵 ==========
+  // ========== Regressor Matrix ==========
 
   /**
-   * @brief 计算回归矩阵 Y(q, qd, qdd)
-   * @param q 关节角度
-   * @param qd 关节速度
-   * @param qdd 关节加速度
-   * @param flags 额外参数标志
-   * @return 回归矩阵 Y，满足 τ = Y * θ
+   * @brief Compute regressor matrix Y(q, qd, qdd)
+   * @param q Joint angles
+   * @param qd Joint velocities
+   * @param qdd Joint accelerations
+   * @param flags Extra parameter flags
+   * @return Regressor matrix Y, satisfying tau = Y * theta
    */
   MatrixXd
   computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
@@ -127,49 +127,53 @@ public:
                          MuJoCoParamFlags flags = MuJoCoParamFlags::ALL) const;
 
   /**
-   * @brief 计算观测矩阵 W (堆叠多个样本的回归矩阵)
+   * @brief Compute observation matrix W (stacked regressor matrix across samples)
    */
   MatrixXd computeObservationMatrix(
       const MatrixXd &Q, const MatrixXd &Qd, const MatrixXd &Qdd,
       MuJoCoParamFlags flags = MuJoCoParamFlags::ALL) const;
 
   /**
-   * @brief 获取参数名称列表 (用于调试)
+   * @brief Get list of parameter names (for debugging)
    */
   std::vector<std::string>
   getParameterNames(MuJoCoParamFlags flags = MuJoCoParamFlags::ALL) const;
 
+  /**
+   * @brief Compute body origin Jacobian (public helper)
+   */
+  MatrixXd computeBodyOriginJacobian(std::size_t body_idx,
+                                     const VectorXd &q) const;
+
 private:
-  std::array<MuJoCoBody, 11> bodies_; // 与 MuJoCoPandaDynamics 相同
+  std::array<MuJoCoBody, 11> bodies_; // Same as MuJoCoPandaDynamics
   Vector3d gravity_{0, 0, -9.81};
 
   void initBodies();
 
-  // ========== 运动学 ==========
+  // ========== Kinematics ==========
 
   std::vector<Matrix4d> computeBodyTransforms(const VectorXd &q) const;
   Vector3d computeBodyCOM(std::size_t body_idx, const VectorXd &q) const;
 
-  // Body 原点的雅可比 (用于回归矩阵，惯量定义在 Body 原点)
-  MatrixXd computeBodyOriginJacobian(std::size_t body_idx,
-                                     const VectorXd &q) const;
+  // Body origin Jacobian derivative (inertia defined at body origin)
   MatrixXd computeBodyOriginJacobianDerivative(std::size_t body_idx,
                                                const VectorXd &q,
                                                const VectorXd &qd) const;
 
-  // Body COM 的雅可比 (用于动力学验证)
+  // Body COM Jacobian (for dynamics validation)
   MatrixXd computeBodyJacobian(std::size_t body_idx, const VectorXd &q) const;
   MatrixXd computeBodyJacobianDerivative(std::size_t body_idx,
                                          const VectorXd &q,
                                          const VectorXd &qd) const;
 
-  // ========== 辅助函数 ==========
+  // ========== Helper functions ==========
 
   static Matrix3d skew(const Vector3d &v);
   static Matrix4d poseToTransform(const Vector3d &pos, const Quaterniond &quat);
 
   /**
-   * @brief 计算单个 Body 的回归矩阵块
+   * @brief Compute regressor block for a single body
    */
   MatrixXd computeBodyRegressorBlock(std::size_t body_idx, const VectorXd &q,
                                      const VectorXd &qd,

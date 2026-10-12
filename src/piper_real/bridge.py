@@ -108,7 +108,7 @@ class BridgeSession:
                 return state
 
         self.adapter.emergency_stop()
-        raise RuntimeError("机械臂未能在限定时间内回到安全初始位")
+        raise RuntimeError("Robot failed to return to safe home position within timeout")
 
     def _is_within_home_tolerance(self, position: list[float]) -> bool:
         return all(
@@ -146,7 +146,7 @@ def run_stdio_loop(config_path: Path) -> int:
             print(response, flush=True)
             if response == "OK" and raw_line.strip() == "STOP":
                 break
-    except Exception as exc:  # pragma: no cover - 由运行期兜底
+    except Exception as exc:  # pragma: no cover - Handled at runtime
         print(f"ERROR {exc}", flush=True)
         return 1
     return 0

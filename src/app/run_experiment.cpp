@@ -114,7 +114,7 @@ ExperimentConfig defaultExperimentConfigForRobot(const std::string &robot) {
   }
 
   if (robot != "panda") {
-    throw std::runtime_error("不支持的机械臂类型: " + robot);
+    throw std::runtime_error("Unsupported robot type: " + robot);
   }
 
   config.controller_config = repoRoot() / "config" / "force_controller_node.yaml";
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
 
     if (experiment_config.backend == "piper_real") {
       if (experiment_config.robot != "piper") {
-        throw std::runtime_error("piper_real 后端仅支持 piper 机械臂");
+        throw std::runtime_error("piper_real backend only supports piper robot");
       }
       backend = std::make_unique<app::PiperHardwareBackend>(
           repoRoot() / "src" / "app" / "piper_backend_bridge.py",
@@ -233,10 +233,10 @@ int main(int argc, char **argv) {
       recorder.record(backend->simulationTime(), state, command);
     }
 
-    std::cout << "实验完成，数据已保存到: " << output_csv << std::endl;
+    std::cout << "Experiment completed. Data saved to: " << output_csv << std::endl;
     return 0;
   } catch (const std::exception &e) {
-    std::cerr << "run_experiment 失败: " << e.what() << std::endl;
+    std::cerr << "run_experiment failed: " << e.what() << std::endl;
     return 1;
   }
 }

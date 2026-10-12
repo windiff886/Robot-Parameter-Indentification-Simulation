@@ -76,15 +76,15 @@ class FourierExcitationTrajectory:
     def _validate(self) -> None:
         n_dof = len(self.q0)
         if n_dof != 6:
-            raise ValueError("Fourier 激励轨迹当前仅支持 6 轴 Piper")
+            raise ValueError("Fourier excitation trajectory currently only supports 6-DOF Piper")
         if len(self.a_coefficients) != n_dof or len(self.b_coefficients) != n_dof:
-            raise ValueError("Fourier 系数维度必须与关节数一致")
+            raise ValueError("Fourier coefficient dimensions must match joint count")
         harmonic_count = len(self.a_coefficients[0])
         if harmonic_count == 0:
-            raise ValueError("至少需要一个谐波")
+            raise ValueError("At least one harmonic is required")
         for row in self.a_coefficients + self.b_coefficients:
             if len(row) != harmonic_count:
-                raise ValueError("所有关节的谐波数量必须一致")
+                raise ValueError("Harmonic count must be identical across all joints")
 
     def _apply_initial_condition_constraints(self) -> None:
         for joint_index in range(len(self.q0)):

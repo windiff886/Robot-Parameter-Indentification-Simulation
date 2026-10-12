@@ -1,48 +1,48 @@
-# Piper 机械臂 MuJoCo 模型
+# Piper Robotic Arm MuJoCo Model
 
-Piper 6-DOF 机械臂的 [MuJoCo](https://mujoco.org/) 仿真模型，从 `piper_ros` ROS 包中提取并重构。
+[MuJoCo](https://mujoco.org/) simulation model for the Piper 6-DOF robotic arm, extracted and refactored from the `piper_ros` ROS package.
 
-## 模型来源
+## Model Source
 
-运动学参数和惯性参数来自 `piper_ros/src/piper_description/` 中的 URDF/XACRO 文件，mesh 文件为原始 STL 格式。
+Kinematic and inertial parameters are derived from the URDF/XACRO files in `piper_ros/src/piper_description/`. Mesh files are in their original STL format.
 
-## 文件结构
+## File Structure
 
-| 文件 | 说明 |
+| File | Description |
 |---|---|
-| `piper.xml` | 含夹爪的完整模型（6 旋转关节 + 2 平移夹爪关节），力矩控制模式 |
-| `piper_nohand.xml` | 不含夹爪的 6-DOF 模型，力矩控制模式 |
-| `scene.xml` | 仿真场景（包含 `piper.xml` + 地面 + 灯光 + 天空盒） |
-| `assets/` | STL 网格文件目录 |
+| `piper.xml` | Complete model with gripper (6 revolute joints + 2 prismatic gripper joints), torque control mode |
+| `piper_nohand.xml` | 6-DOF model without gripper, torque control mode |
+| `scene.xml` | Simulation scene (including `piper.xml` + ground + lighting + skybox) |
+| `assets/` | STL mesh files directory |
 
-## 控制模式
+## Control Mode
 
-所有模型使用**纯力矩控制**（`motor` actuator），`ctrl` 信号直接映射为关节力矩 τ：
+All models use **pure torque control** (`motor` actuator), where the `ctrl` signal directly maps to joint torque τ:
 
-- **Joint 1-6**（旋转关节）：力矩范围 ±100 Nm
-- **夹爪**（`piper.xml` 中）：通过 tendon 同步两个手指，力范围 ±10 N
+- **Joint 1-6** (revolute joints): Torque range ±100 Nm
+- **Gripper** (in `piper.xml`): Two fingers synchronized via tendon, force range ±10 N
 
-## 快速使用
+## Quick Start
 
 ```python
 import mujoco
 
-# 加载模型
+# Load model
 model = mujoco.MjModel.from_xml_path("piper/scene.xml")
 data = mujoco.MjData(model)
 
-# 设置到 home 位姿
+# Reset to home keyframe
 mujoco.mj_resetDataKeyframe(model, data, 0)
 
-# 仿真步进
+# Simulation step
 mujoco.mj_step(model, data)
 ```
 
 ```bash
-# 使用 MuJoCo 自带查看器
+# Use MuJoCo built-in viewer
 python3 -m mujoco.viewer --mjcf piper/scene.xml
 ```
 
-## 许可证
+## License
 
-mesh 文件来源于 [agilex robotics](https://github.com/agilexrobotics) 的 Piper 机械臂 ROS 包。
+Mesh files originate from the Piper robotic arm ROS package by [AgileX Robotics](https://github.com/agilexrobotics).

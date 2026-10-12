@@ -42,7 +42,7 @@ find_library(MUJOCO_LIB mujoco
 )
 
 if(NOT MUJOCO_INCLUDE_DIR OR NOT MUJOCO_LIB)
-  message(FATAL_ERROR "未找到 MuJoCo。请设置 MUJOCO_DIR，或显式传入 MUJOCO_INCLUDE_DIR / MUJOCO_LIB。")
+  message(FATAL_ERROR "MuJoCo not found. Please set MUJOCO_DIR, or explicitly pass MUJOCO_INCLUDE_DIR / MUJOCO_LIB.")
 endif()
 
 set(PROJECT_ROOT_DIR "${CMAKE_SOURCE_DIR}")

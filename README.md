@@ -1,87 +1,79 @@
-# 机器人动力学参数辨识系统
+# Robot Dynamics Parameter Identification System
 
-本分支是一个**纯 MuJoCo / 纯 CMake / 无 ROS** 的参数辨识实验版本，目标是在
-Windows 或 Linux 上直接构建并运行。
+This branch is a **pure MuJoCo / pure CMake / ROS-free** experimental version for robot parameter identification, designed to build and run directly on Windows or Linux.
 
-> **声明**：本项目参考了 [BIRDy (Benchmark for Identification of Robot Dynamics)](https://github.com/TUM-ICS/BIRDY) 开源项目。
+> **Attribution**: This project references the [BIRDy (Benchmark for Identification of Robot Dynamics)](https://github.com/TUM-ICS/BIRDY) open-source project.
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 1. 安装依赖
+### 1. Install Dependencies
 
-需要预先安装并配置：
+The following dependencies need to be installed and configured in advance:
 
 - MuJoCo
 - GLFW
 - Eigen3
 - CMake 3.21+
-- C++17 编译器
+- C++17 compiler
 
-如果 MuJoCo 未安装在系统默认路径，请设置环境变量 `MUJOCO_DIR`。
+If MuJoCo is not installed in the default system location, please set the `MUJOCO_DIR` environment variable.
 
-### 2. 配置项目
+### 2. Configure the Project
 
 ```bash
 cmake -S . -B build
 ```
 
-### 3. 构建
+### 3. Build
 
 ```bash
 cmake --build build --parallel
 ```
 
-### 4. 运行统一实验入口
+### 4. Run Unified Experiment Entry Point
 
 ```bash
 ./build/run_experiment
 ```
 
-默认会：
+By default, this will:
 
-- 读取 [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml)
-- 读取 [force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/force_controller_node.yaml)
-- 读取 [panda_sim_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/panda_sim_node.yaml)
-- 使用 [scene.xml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/franka_emika_panda/scene.xml)
-- 在 `data/benchmark_data.csv` 输出采样数据
+- Read [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml)
+- Read [force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/force_controller_node.yaml)
+- Read [panda_sim_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/panda_sim_node.yaml)
+- Use [scene.xml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/franka_emika_panda/scene.xml)
+- Output sampled data to `data/benchmark_data.csv`
 
-通过修改 [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml) 中的
-`robot` 和 `backend` 字段，可以在仿真后端和 Piper 真机后端之间切换。切到 `piper`
-且 `backend: sim` 时，会自动改用
-[piper_force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_force_controller_node.yaml)
-和 `piper` 对应的 MuJoCo 模型。
+By modifying the `robot` and `backend` fields in [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml), you can switch between the simulation backend and the Piper physical hardware backend. When switching to `piper` with `backend: sim`, the system automatically uses [piper_force_controller_node.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_force_controller_node.yaml) and the corresponding Piper MuJoCo model.
 
-推荐的后端切换方式：
+Recommended backend switching options:
 
-- `backend: sim`：使用 MuJoCo 仿真后端
-- `backend: piper_real`：使用 Piper 真机后端
+- `backend: sim`: Use MuJoCo simulation backend
+- `backend: piper_real`: Use Piper physical hardware backend
 
-可选参数：
+Optional arguments:
 
 ```bash
 ./build/run_experiment --headless --output data/my_run.csv
 ```
 
-也可以显式指定实验配置：
+You can also explicitly specify the experiment configuration:
 
 ```bash
 ./build/run_experiment --experiment-config config/experiment.yaml
 ```
 
-### 5. 运行参数辨识
+### 5. Run Parameter Identification
 
 ```bash
 ./build/identify
 ```
 
-默认读取 [identification.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/identification.yaml)。
-其中 `robot` 字段可以在 `panda` 和 `piper` 之间切换，`identify` 会据此选择
-对应的自由度、动力学基准和回归矩阵构造方式。`panda` 使用 7 轴链路，
-`piper` 使用 6 轴链路。
+By default, this reads [identification.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/identification.yaml). The `robot` field can be toggled between `panda` and `piper`. Based on this, `identify` selects the corresponding degrees of freedom, dynamics baseline, and regressor matrix construction method. `panda` uses a 7-axis kinematic chain, while `piper` uses a 6-axis chain.
 
-可选参数：
+Optional arguments:
 
 ```bash
 ./build/identify --config config/identification.yaml
@@ -91,77 +83,76 @@ cmake --build build --parallel
 ./build/mujoco_identify data/benchmark_data.csv
 ```
 
-### 6. 运行 Piper 真机实验
+### 6. Run Piper Physical Hardware Experiment
 
-真机实验与仿真实验共用同一个入口程序，只是后端不同：
+Physical hardware experiments share the same entry executable with simulation experiments, differing only in the backend:
 
 ```bash
 ./build/run_experiment --experiment-config config/experiment.yaml --headless
 ```
 
-使用前请先确认：
+Before running, please confirm:
 
-- 已按 [piper_sdk/README(ZH).MD](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/piper_sdk/README(ZH).MD) 准备 CAN 环境
-- 已安装 `python-can`
-- 已在 [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml) 中设置 `backend: piper_real`
-- 已检查 [config/piper_real_experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_real_experiment.yaml) 中的 `control_mode`、软限位和初始位
+- CAN environment is set up according to [piper_sdk/README(ZH).MD](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/piper_sdk/README(ZH).MD)
+- `python-can` is installed
+- `backend: piper_real` is configured in [experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/experiment.yaml)
+- Check `control_mode`, soft limits, and home position in [config/piper_real_experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_real_experiment.yaml)
 
-默认配置使用 `excitation_trajectory`，会通过 MIT 接口执行 Fourier 激励轨迹，并记录与仿真相同结构的 `time / q / qd / qdd / tau`。
+The default configuration uses `excitation_trajectory`, executing a Fourier excitation trajectory via the MIT interface and recording `time / q / qd / qdd / tau` with the same structure as in simulation.
 
-在真正开始激励轨迹之前，bridge 会先执行“回安全初始位”流程：
+Before actually executing the excitation trajectory, the bridge runs a "return to safe initial position" routine:
 
-- 若 `move_to_home_before_start: true`
-- 且当前关节位置不在 `home_position_tolerance` 容差窗口内
-- bridge 会先用 `home_speed_rate` 把机械臂移动到 `home_position`
-- 只有进入容差窗口后，统一实验主循环才会开始执行激励轨迹
+- If `move_to_home_before_start: true`
+- And current joint positions are outside the `home_position_tolerance` window
+- The bridge first moves the arm to `home_position` at `home_speed_rate`
+- Only after entering the tolerance window does the unified experiment main loop begin executing the excitation trajectory
 
-这里的“回零位”在工程上等价为“回到配置中的安全初始位 `home_position`”，不是重新写入电机零点标定。
+Here, "homing" is practically equivalent to "returning to the configured safe initial pose `home_position`", rather than rewriting the motor zero-point calibration.
 
-可选模式：
+Available modes:
 
-- `excitation_trajectory`：真机参数辨识主模式，执行 Fourier 激励轨迹
-- `mit_identification`：与激励轨迹相同的 MIT 接口实验模式，便于后续扩展不同控制策略
-- `position_validation`：小幅关节位置轨迹验证
-- `state_only`：只连接与采样，不下发运动命令
+- `excitation_trajectory`: Main mode for hardware parameter identification, executing a Fourier excitation trajectory
+- `mit_identification`: MIT interface experimental mode identical to excitation trajectory, convenient for future control strategy extensions
+- `position_validation`: Small-amplitude joint position trajectory validation
+- `state_only`: Connection and sampling only, without issuing motion commands
 
-激励轨迹相关参数位于 [config/piper_real_experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_real_experiment.yaml)：
+Excitation trajectory parameters are located in [config/piper_real_experiment.yaml](/home/windiff/Code/Robot-Parameter-Indentification-Simulation/config/piper_real_experiment.yaml):
 
 - `trajectory_period`
 - `trajectory_harmonics`
 - `trajectory_coefficient_scale`
 - `trajectory_seed`
 
-这些参数决定真机实验使用的 Fourier 轨迹形状。当前实现会用固定随机种子生成可复现的轨迹系数，并自动满足 `t=0` 时的初始位置/零速度约束。
+These parameters determine the shape of the Fourier trajectory used in hardware experiments. The current implementation uses a fixed random seed to generate reproducible trajectory coefficients, automatically satisfying the initial position / zero velocity constraints at `t=0`.
 
-真机 bridge 还会额外检查：
+The hardware bridge additionally checks:
 
 - `joint_soft_limits`
 - `max_command_velocity`
 - `max_command_torque`
 - `home_position_tolerance`
 
-任一关节命令超过这些阈值时，bridge 会拒绝该步命令并触发急停，避免上层统一主循环把明显异常的控制量直接发送到真机。
+If any joint command exceeds these thresholds, the bridge rejects the step command and triggers an emergency stop, preventing the upper-level unified main loop from sending abnormal control values directly to the physical arm.
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```text
-├── franka_emika_panda/   # MuJoCo Panda 模型与资源
-├── src/app/              # 单进程实验入口
-├── src/sim_com_node/     # 纯 C++ MuJoCo 仿真器
-├── src/force_node/       # 纯 C++ 控制器、轨迹与碰撞检查
-├── src/identification/   # 离线参数辨识与诊断工具
-├── config/               # 运行配置
-└── doc/                  # 数学推导与实验说明
+├── franka_emika_panda/   # MuJoCo Panda model and assets
+├── src/app/              # Single-process experiment entry points
+├── src/sim_com_node/     # Pure C++ MuJoCo simulator
+├── src/force_node/       # Pure C++ controller, trajectory generator, collision check
+├── src/identification/   # Offline parameter identification and diagnostic tools
+├── config/               # Runtime configuration files
+└── doc/                  # Mathematical derivations and documentation
 ```
 
 ---
 
-## 系统架构
+## System Architecture
 
-当前分支采用统一实验调度架构，不再依赖 ROS 中间层。实验链路分为
-“配置层 -> 控制层 -> 执行后端层 -> 数据层 -> 辨识层” 五个部分。
+The current branch adopts a unified experiment scheduling architecture independent of ROS middleware. The experimental pipeline is divided into five tiers: "Configuration -> Control -> Execution Backend -> Data -> Identification".
 
 ```text
 config/*.yaml
@@ -171,14 +162,14 @@ run_experiment
     |
     +--> ForceController --------------------+
     |                                        |
-    |                                        | 统一控制命令
+    |                                        | Unified control commands
     |                                        v
     +--> SimulationBackend / PiperHardwareBackend
              |
-             | 关节状态 q / qd
+             | Joint states q / qd
              +---------------------------> ForceController
              |
-             | 统一 CSV 记录
+             | Unified CSV recording
              v
         benchmark_data.csv
              |
@@ -189,26 +180,26 @@ run_experiment
    results/identification.yaml
 ```
 
-- `run_experiment` 是统一实验调度入口，负责读取配置、创建控制器、选择执行后端，并驱动唯一的一套时间循环。
-- `ForceController` 负责激励轨迹生成、PD 跟踪、力矩限幅，并输出统一控制命令。
-- `SimulationBackend` 与 `PiperHardwareBackend` 分别负责仿真步进和真机命令执行，但不改变上层实验流程。
-- `identify` 与 `mujoco_identify` 负责离线辨识，读取实验 CSV，构造观测矩阵并输出参数结果。
+- `run_experiment` is the unified experiment scheduling entry point, responsible for loading configurations, creating controllers, selecting execution backends, and driving the single unified time loop.
+- `ForceController` handles excitation trajectory generation, PD tracking, torque limiting, and output of unified control commands.
+- `SimulationBackend` and `PiperHardwareBackend` handle simulation stepping and physical arm command execution, respectively, without altering the upper experiment workflow.
+- `identify` and `mujoco_identify` perform offline identification, loading experimental CSV data, constructing observation matrices, and outputting parameter results.
 
-如果按运行时序看，单步循环可以概括为：
+In terms of runtime sequence, a single-step loop proceeds as follows:
 
-1. 后端返回当前关节状态。
-2. `ForceController` 根据当前时刻和关节状态计算统一控制命令。
-3. 后端执行一步仿真或一步真机命令下发。
-4. 共享记录器将 `q / qd / qdd / tau` 记录到 CSV，供后续辨识使用。
+1. Backend returns current joint states.
+2. `ForceController` computes unified control commands based on current timestamp and joint states.
+3. Backend executes one step of simulation or sends one step of hardware commands.
+4. Shared recorder logs `q / qd / qdd / tau` to CSV for downstream identification.
 
 ---
 
-## 主要可执行文件
+## Main Executables
 
-- `run_experiment`：运行单进程 MuJoCo 闭环实验并生成 CSV
-- `identify`：读取 CSV，执行单算法或完整 benchmark
-  支持 `NLS_FRICTION` 非线性摩擦联合辨识（`--algorithm 8`）
-- `mujoco_identify`：快速执行一次 MuJoCo 回归辨识
-- `dynamics_diagnostic`：对比动力学模型与记录数据
-- `model_comparison`：对比不同动力学模型
-- `regressor_test`：检查回归矩阵与 MuJoCo 动力学一致性
+- `run_experiment`: Runs single-process MuJoCo closed-loop experiments and generates CSV data
+- `identify`: Loads CSV data and executes a single algorithm or full benchmark
+  Supports `NLS_FRICTION` non-linear friction joint identification (`--algorithm 8`)
+- `mujoco_identify`: Quick execution of single MuJoCo regressor identification
+- `dynamics_diagnostic`: Compares dynamic models against recorded data
+- `model_comparison`: Compares different dynamic models
+- `regressor_test`: Verifies consistency between regressor matrix and MuJoCo dynamics

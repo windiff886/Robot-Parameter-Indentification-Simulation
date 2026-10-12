@@ -1,4 +1,4 @@
-# 无 ROS 力矩控制器参数
+# ROS-free torque controller parameters
 control_rate_hz: 1000.0
 trajectory_duration: 30.0
 kp: [450.0, 450.0, 450.0, 450.0, 180.0, 100.0, 40.0]

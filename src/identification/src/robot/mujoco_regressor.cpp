@@ -1,6 +1,6 @@
 /**
  * @file mujoco_regressor.cpp
- * @brief 基于 MuJoCo 运动学的回归矩阵计算实现
+ * @brief Implementation of regressor matrix computation based on MuJoCo kinematics
  */
 
 #include "mujoco_regressor.hpp"
@@ -18,12 +18,12 @@ MuJoCoInertialParams::fromMuJoCoBody(const MuJoCoBody &body) {
 
   params.m = body.mass;
 
-  // 一阶矩: m * c
+  // First moments: m * c
   params.mx = body.mass * body.com.x();
   params.my = body.mass * body.com.y();
   params.mz = body.mass * body.com.z();
 
-  // 惯量张量从质心转换到 Body 原点 (平行轴定理)
+  // Inertia tensor transformed from COM to Body origin (parallel axis theorem)
   // I_origin = I_com + m * (c^T * c * I - c * c^T)
   double cx = body.com.x();
   double cy = body.com.y();
@@ -41,15 +41,15 @@ MuJoCoInertialParams::fromMuJoCoBody(const MuJoCoBody &body) {
 }
 
 // ============================================================================
-// MuJoCoRegressor 构造函数
+// MuJoCoRegressor constructor
 // ============================================================================
 
 MuJoCoRegressor::MuJoCoRegressor() { initBodies(); }
 
 void MuJoCoRegressor::initBodies() {
-  // 复制 MuJoCoPandaDynamics 的 Body 参数 (来自 panda.xml)
+  // Copy body parameters from MuJoCoPandaDynamics (from panda.xml)
 
-  // Link 0 (基座，无关节)
+  // Link 0 (base, no joint)
   bodies_[0].name = "link0";
   bodies_[0].pos = Vector3d(0, 0, 0);
   bodies_[0].quat = Quaterniond(1, 0, 0, 0);
@@ -182,7 +182,7 @@ void MuJoCoRegressor::initBodies() {
   bodies_[7].damping = 1.0;
   bodies_[7].has_joint = true;
 
-  // Hand (固定连接到 link7)
+  // Hand (fixed connection to link7)
   bodies_[8].name = "hand";
   bodies_[8].pos = Vector3d(0, 0, 0.107);
   bodies_[8].quat = Quaterniond(0.9238795, 0, 0, -0.3826834);
@@ -196,7 +196,7 @@ void MuJoCoRegressor::initBodies() {
   bodies_[8].Iyz = 0;
   bodies_[8].has_joint = false;
 
-  // 手指 (暂不计入)
+  // Fingers (not currently included)
   bodies_[9].name = "left_finger";
   bodies_[9].has_joint = false;
   bodies_[10].name = "right_finger";
@@ -204,7 +204,7 @@ void MuJoCoRegressor::initBodies() {
 }
 
 // ============================================================================
-// 辅助函数
+// Helper functions
 // ============================================================================
 
 MuJoCoRegressor::Matrix3d MuJoCoRegressor::skew(const Vector3d &v) {
@@ -222,14 +222,14 @@ MuJoCoRegressor::poseToTransform(const Vector3d &pos, const Quaterniond &quat) {
 }
 
 // ============================================================================
-// 运动学
+// Kinematics
 // ============================================================================
 
 std::vector<MuJoCoRegressor::Matrix4d>
 MuJoCoRegressor::computeBodyTransforms(const VectorXd &q) const {
   std::vector<Matrix4d> transforms(11); // N_BODIES
 
-  // link0 在世界坐标系
+  // link0 in world coordinates
   transforms[0] = poseToTransform(bodies_[0].pos, bodies_[0].quat);
 
   std::size_t joint_idx = 0;
@@ -237,10 +237,10 @@ MuJoCoRegressor::computeBodyTransforms(const VectorXd &q) const {
   for (std::size_t i = 1; i < 8; ++i) { // link1-7
     const auto &body = bodies_[i];
 
-    // 相对于父 body 的基础变换
+    // Base transform relative to parent body
     Matrix4d T_parent_body = poseToTransform(body.pos, body.quat);
 
-    // 如果有关节，添加关节旋转
+    // If has joint, add joint rotation
     if (body.has_joint && joint_idx < N_DOF) {
       double angle = q(joint_idx);
       Quaterniond joint_rot =
@@ -256,7 +256,7 @@ MuJoCoRegressor::computeBodyTransforms(const VectorXd &q) const {
     }
   }
 
-  // hand 固定连接到 link7
+  // hand fixed connection to link7
   transforms[8] =
       transforms[7] * poseToTransform(bodies_[8].pos, bodies_[8].quat);
 
@@ -272,13 +272,13 @@ MuJoCoRegressor::computeBodyCOM(std::size_t body_idx, const VectorXd &q) const {
 }
 
 /**
- * @brief 计算 Body 原点的雅可比矩阵 (用于回归矩阵)
+ * @brief Compute Jacobian matrix at Body origin (for regressor matrix)
  *
- * 注意：这与 computeBodyJacobian 不同！
- * - computeBodyJacobian: 计算 COM 的雅可比 (用于动力学)
- * - computeBodyOriginJacobian: 计算 Body 原点的雅可比 (用于回归矩阵)
+ * Note: This is different from computeBodyJacobian!
+ * - computeBodyJacobian: Computes COM Jacobian (for dynamics)
+ * - computeBodyOriginJacobian: Computes Body origin Jacobian (for regressor matrix)
  *
- * 回归矩阵使用标准惯性参数 (m, mc, I_origin)，惯量定义在 Body 原点
+ * Regressor matrix uses standard inertial parameters (m, mc, I_origin), with inertia defined at Body origin
  */
 MuJoCoRegressor::MatrixXd
 MuJoCoRegressor::computeBodyOriginJacobian(std::size_t body_idx,
@@ -287,23 +287,23 @@ MuJoCoRegressor::computeBodyOriginJacobian(std::size_t body_idx,
 
   auto transforms = computeBodyTransforms(q);
 
-  // Body 原点位置 (不是 COM！)
+  // Body origin position (not COM!)
   Vector3d p_origin = transforms[body_idx].block<3, 1>(0, 3);
 
-  // 对每个关节
+  // For each joint
   std::size_t joint_count = 0;
   for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
     if (bodies_[i].has_joint) {
-      // 关节轴在世界坐标系中的方向
+      // Joint axis direction in world frame
       Vector3d z_axis = transforms[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
 
-      // 关节原点位置
+      // Joint origin position
       Vector3d p_joint = transforms[i].block<3, 1>(0, 3);
 
-      // 线速度雅可比: z × (p_origin - p_joint)
+      // Linear velocity Jacobian: z × (p_origin - p_joint)
       J.block<3, 1>(0, joint_count) = z_axis.cross(p_origin - p_joint);
 
-      // 角速度雅可比: z
+      // Angular velocity Jacobian: z
       J.block<3, 1>(3, joint_count) = z_axis;
 
       ++joint_count;
@@ -321,20 +321,20 @@ MuJoCoRegressor::computeBodyJacobian(std::size_t body_idx,
   auto transforms = computeBodyTransforms(q);
   Vector3d p_body = computeBodyCOM(body_idx, q);
 
-  // 对每个关节
+  // For each joint
   std::size_t joint_count = 0;
   for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
     if (bodies_[i].has_joint) {
-      // 关节轴在世界坐标系中的方向
+      // Joint axis direction in world frame
       Vector3d z_axis = transforms[i].block<3, 3>(0, 0) * bodies_[i].joint_axis;
 
-      // 关节原点位置
+      // Joint origin position
       Vector3d p_joint = transforms[i].block<3, 1>(0, 3);
 
-      // 线速度雅可比: z × (p_body - p_joint)
+      // Linear velocity Jacobian: z × (p_body - p_joint)
       J.block<3, 1>(0, joint_count) = z_axis.cross(p_body - p_joint);
 
-      // 角速度雅可比: z
+      // Angular velocity Jacobian: z
       J.block<3, 1>(3, joint_count) = z_axis;
 
       ++joint_count;
@@ -346,7 +346,7 @@ MuJoCoRegressor::computeBodyJacobian(std::size_t body_idx,
 
 MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyOriginJacobianDerivative(
     std::size_t body_idx, const VectorXd &q, const VectorXd &qd) const {
-  // 数值微分
+  // Numerical differentiation
   const double eps = 1e-7;
   VectorXd q_plus = q + eps * qd;
   VectorXd q_minus = q - eps * qd;
@@ -359,7 +359,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyOriginJacobianDerivative(
 
 MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyJacobianDerivative(
     std::size_t body_idx, const VectorXd &q, const VectorXd &qd) const {
-  // 数值微分
+  // Numerical differentiation
   const double eps = 1e-7;
   VectorXd q_plus = q + eps * qd;
   VectorXd q_minus = q - eps * qd;
@@ -371,11 +371,11 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyJacobianDerivative(
 }
 
 // ============================================================================
-// 参数向量
+// Parameter vector
 // ============================================================================
 
 std::size_t MuJoCoRegressor::numParameters(MuJoCoParamFlags flags) const {
-  // 8 个 Body (link1-7 + hand)，每个 10 个惯性参数
+  // 8 bodies (link1-7 + hand), each with 10 inertial parameters
   std::size_t params = N_BODIES * MuJoCoInertialParams::PARAMS_PER_BODY;
 
   if (hasFlag(flags, MuJoCoParamFlags::ARMATURE)) {
@@ -394,9 +394,9 @@ MuJoCoRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
   const std::size_t num_params = numParameters(flags);
   VectorXd theta = VectorXd::Zero(num_params);
 
-  // 填充惯性参数 (link1-7 + hand)
+  // Fill inertial parameters (link1-7 + hand)
   for (std::size_t i = 0; i < N_BODIES; ++i) {
-    std::size_t body_idx = i + 1; // bodies_[1] 到 bodies_[8]
+    std::size_t body_idx = i + 1; // bodies_[1] to bodies_[8]
     auto sip = MuJoCoInertialParams::fromMuJoCoBody(bodies_[body_idx]);
     auto sip_vec = sip.toVector();
 
@@ -406,7 +406,7 @@ MuJoCoRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
 
   std::size_t current_offset = N_BODIES * MuJoCoInertialParams::PARAMS_PER_BODY;
 
-  // Armature 参数
+  // Armature parameters
   if (hasFlag(flags, MuJoCoParamFlags::ARMATURE)) {
     for (std::size_t i = 0; i < N_DOF; ++i) {
       theta(current_offset + i) = bodies_[i + 1].armature;
@@ -414,7 +414,7 @@ MuJoCoRegressor::computeParameterVector(MuJoCoParamFlags flags) const {
     current_offset += N_DOF;
   }
 
-  // Damping 参数
+  // Damping parameters
   if (hasFlag(flags, MuJoCoParamFlags::DAMPING)) {
     for (std::size_t i = 0; i < N_DOF; ++i) {
       theta(current_offset + i) = bodies_[i + 1].damping;
@@ -455,7 +455,7 @@ MuJoCoRegressor::getParameterNames(MuJoCoParamFlags flags) const {
 }
 
 // ============================================================================
-// 回归矩阵
+// Regressor matrix
 // ============================================================================
 
 MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
@@ -463,27 +463,27 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
     const VectorXd &qdd) const {
 
   /**
-   * 标准惯性参数回归矩阵推导（Body 局部坐标系）
+   * Standard inertial parameter regressor matrix derivation (Body local frame)
    *
-   * 参数向量: θ = [m, mx, my, mz, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
-   * - (mx, my, mz) = m * (cx, cy, cz) 是一阶矩（局部坐标系）
-   * - I_origin 是在 Body 原点的惯量张量（局部坐标系）
+   * Parameter vector: θ = [m, mx, my, mz, Ixx, Ixy, Ixz, Iyy, Iyz, Izz]
+   * - (mx, my, mz) = m * (cx, cy, cz) are first moments (local frame)
+   * - I_origin is inertia tensor at Body origin (local frame)
    *
-   * 动力学方程（在 Body 局部坐标系中）：
+   * Dynamics equations (in Body local frame):
    *   f_local = m * (a_local - g_local) + K * mc_local
    *   n_local = [mc_local]× * (a_local - g_local) + I_origin * α_local +
    * [ω_local]× * I_origin * ω_local
    *
-   * 其中 K = [α_local]× + [ω_local]× * [ω_local]×
+   * where K = [α_local]× + [ω_local]× * [ω_local]×
    *
-   * 关节扭矩：τ = J_v_local^T * f_local + J_w_local^T * n_local
+   * Joint torque: τ = J_v_local^T * f_local + J_w_local^T * n_local
    */
 
   auto transforms = computeBodyTransforms(q);
-  Matrix3d R = transforms[body_idx].block<3, 3>(0, 0); // Body 到 World 旋转
-  Vector3d p_origin = transforms[body_idx].block<3, 1>(0, 3); // Body 原点位置
+  Matrix3d R = transforms[body_idx].block<3, 3>(0, 0); // Body to World rotation
+  Vector3d p_origin = transforms[body_idx].block<3, 1>(0, 3); // Body origin position
 
-  // ========== 计算 Body 原点的雅可比 (世界坐标系) ==========
+  // ========== Compute Body origin Jacobian (World Frame) ==========
   MatrixXd J_world = MatrixXd::Zero(6, N_DOF);
   std::size_t joint_count = 0;
   for (std::size_t i = 1; i <= body_idx && i < 8; ++i) {
@@ -496,7 +496,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
     }
   }
 
-  // 雅可比导数（数值微分）
+  // Jacobian derivative (numerical differentiation)
   const double dt = 1e-7;
   VectorXd q_plus = q + dt * qd;
   auto transforms_plus = computeBodyTransforms(q_plus);
@@ -524,12 +524,12 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
   Eigen::Matrix<double, 3, Eigen::Dynamic> Jw_dot_world =
       J_world_dot.bottomRows(3);
 
-  // ========== 世界坐标系中的运动学量 ==========
+  // ========== Kinematic quantities in World Frame ==========
   Vector3d a_origin_world = Jv_world * qdd + Jv_dot_world * qd;
   Vector3d omega_world = Jw_world * qd;
   Vector3d alpha_world = Jw_world * qdd + Jw_dot_world * qd;
 
-  // ========== 转换到 Body 局部坐标系 ==========
+  // ========== Transform to Body Local Frame ==========
   Matrix3d Rt = R.transpose();
   Vector3d a_local = Rt * a_origin_world;
   Vector3d omega_local = Rt * omega_world;
@@ -537,14 +537,14 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
   Vector3d g_local = Rt * gravity_;
   Vector3d b_local = a_local - g_local;
 
-  // 局部坐标系中的雅可比
+  // Jacobians in local frame
   Eigen::Matrix<double, 3, Eigen::Dynamic> Jv_local = Rt * Jv_world;
   Eigen::Matrix<double, 3, Eigen::Dynamic> Jw_local = Rt * Jw_world;
 
-  // ========== 构建回归矩阵块 ==========
+  // ========== Construct regressor matrix block ==========
   MatrixXd Y_block = MatrixXd::Zero(N_DOF, 10);
 
-  // K 矩阵: K = [α]× + [ω]× * [ω]×
+  // K matrix: K = [α]× + [ω]× * [ω]×
   Matrix3d alpha_skew = skew(alpha_local);
   Matrix3d omega_skew = skew(omega_local);
   Matrix3d K = alpha_skew + omega_skew * omega_skew;
@@ -552,10 +552,10 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
   double ox = omega_local(0), oy = omega_local(1), oz = omega_local(2);
   double ax = alpha_local(0), ay = alpha_local(1), az = alpha_local(2);
 
-  // 1. 质量 m: f = m * b, n = 0
+  // 1. Mass m: f = m * b, n = 0
   Y_block.col(0) = Jv_local.transpose() * b_local;
 
-  // 2. 一阶矩 (mx, my, mz): f = K * e_i, n = e_i × b
+  // 2. First moments (mx, my, mz): f = K * e_i, n = e_i × b
   for (int i = 0; i < 3; ++i) {
     Vector3d e_i = Vector3d::Zero();
     e_i(i) = 1.0;
@@ -563,7 +563,7 @@ MuJoCoRegressor::MatrixXd MuJoCoRegressor::computeBodyRegressorBlock(
                          Jw_local.transpose() * e_i.cross(b_local);
   }
 
-  // 3. 惯量张量: n = E * α + [ω]× * E * ω
+  // 3. Inertia tensor: n = E * α + [ω]× * E * ω
   Y_block.col(4) = Jw_local.transpose() * Vector3d(ax, ox * oz, -ox * oy);
   Y_block.col(5) = Jw_local.transpose() *
                    Vector3d(ay - ox * oz, ax + oy * oz, ox * ox - oy * oy);
@@ -585,9 +585,9 @@ MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
   const std::size_t num_params = numParameters(flags);
   MatrixXd Y = MatrixXd::Zero(N_DOF, num_params);
 
-  // 计算每个 Body 的回归矩阵块
+  // Compute regressor matrix block for each body
   for (std::size_t i = 0; i < N_BODIES; ++i) {
-    std::size_t body_idx = i + 1; // bodies_[1] 到 bodies_[8]
+    std::size_t body_idx = i + 1; // bodies_[1] to bodies_[8]
     MatrixXd Y_body = computeBodyRegressorBlock(body_idx, q, qd, qdd);
 
     std::size_t offset = i * MuJoCoInertialParams::PARAMS_PER_BODY;
@@ -596,7 +596,7 @@ MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
 
   std::size_t current_offset = N_BODIES * MuJoCoInertialParams::PARAMS_PER_BODY;
 
-  // Armature 回归: τ_armature = armature * q̈
+  // Armature regression: τ_armature = armature * q̈
   if (hasFlag(flags, MuJoCoParamFlags::ARMATURE)) {
     for (std::size_t i = 0; i < N_DOF; ++i) {
       Y(i, current_offset + i) = qdd(i);
@@ -604,9 +604,9 @@ MuJoCoRegressor::computeRegressorMatrix(const VectorXd &q, const VectorXd &qd,
     current_offset += N_DOF;
   }
 
-  // Damping 回归: 在 MuJoCo 中 damping 是被动项
+  // Damping regression: in MuJoCo, damping is a passive term
   // τ_ctrl = M*q̈ + C*q̇ + G - damping*q̇
-  // 所以回归项是 -q̇
+  // Therefore the regression term is -q̇
   if (hasFlag(flags, MuJoCoParamFlags::DAMPING)) {
     for (std::size_t i = 0; i < N_DOF; ++i) {
       Y(i, current_offset + i) = -qd(i);
@@ -621,7 +621,7 @@ MuJoCoRegressor::computeObservationMatrix(const MatrixXd &Q, const MatrixXd &Qd,
                                           const MatrixXd &Qdd,
                                           MuJoCoParamFlags flags) const {
 
-  const std::size_t K = Q.cols(); // 样本数
+  const std::size_t K = Q.cols(); // Number of samples
   const std::size_t num_params = numParameters(flags);
 
   MatrixXd W = MatrixXd::Zero(N_DOF * K, num_params);

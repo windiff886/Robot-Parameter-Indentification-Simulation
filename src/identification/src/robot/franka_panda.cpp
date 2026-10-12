@@ -102,7 +102,7 @@ FrankaPanda::FrankaPanda() {
   link_params_[6].inertia = InertiaTensor::fromMuJoCo(
       {{1.964e-3, 4.354e-3, 5.433e-3, 1.09e-4, -1.158e-3, 3.41e-4}});
 
-  // Link 7 (只包含 Link 7 自身，不合并 Hand)
+  // Link 7 (contains only Link 7 itself, does not merge Hand)
   // fullinertia=\"0.012516 0.010027 0.004815 -0.000428 -0.001196 -0.000741\"
   link_params_[7].mass = 7.35522e-01;
   link_params_[7].com = {{1.0517e-2, -4.252e-3, 6.1597e-2}};
@@ -110,20 +110,20 @@ FrankaPanda::FrankaPanda() {
       {{1.2516e-2, 1.0027e-2, 4.815e-3, -4.28e-4, -1.196e-3, -7.41e-4}});
 
   // ========================================================================
-  // Fixed Body: Hand (附着在 Link 7)
+  // Fixed Body: Hand (attached to Link 7)
   // ========================================================================
-  // Hand 通过固定变换附着在 Link 7 上
-  // Position: (0, 0, 0.107) - 沿 Link 7 的 z 轴向上 107mm
-  // Orientation: quat=(0.9238795, 0, 0, -0.3826834) - 绕 z 轴旋转 -45°
+  // Hand is attached to Link 7 via fixed transform
+  // Position: (0, 0, 0.107) - 107mm upwards along Link 7 z-axis
+  // Orientation: quat=(0.9238795, 0, 0, -0.3826834) - rotate -45° about z-axis
   //
-  // Hand 自身的惯性参数（在 Hand 质心处定义）:
+  // Hand inertia parameters (defined at Hand center of mass):
   //   mass=0.73 kg
   //   COM (in hand frame): (-0.01, 0, 0.03)
   //   diaginertia: (0.001, 0.0025, 0.0017)
   {
     FixedBodyAttachment hand;
     hand.name = "hand";
-    hand.parent_link_idx = 7;            // 附着到 Link 7
+    hand.parent_link_idx = 7;            // Attached to Link 7
     hand.position = {{0.0, 0.0, 0.107}}; // 107mm offset along z
     hand.quaternion = {
         {0.9238795, 0.0, 0.0, -0.3826834}}; // -45° about z (w,x,y,z)

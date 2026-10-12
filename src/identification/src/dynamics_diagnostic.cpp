@@ -1,11 +1,11 @@
 /**
  * @file dynamics_diagnostic.cpp
- * @brief 诊断 RobotDynamics 与 MuJoCo 数据不一致的原因
+ * @brief Diagnose discrepancies between RobotDynamics and MuJoCo data
  * 
- * 对比以下几个计算源：
- * 1. RobotDynamics (DH参数实现)
- * 2. MuJoCoPandaDynamics (MuJoCo XML参数实现)
- * 3. 实验数据中记录的扭矩
+ * Compares the following calculation sources:
+ * 1. RobotDynamics (DH parameter implementation)
+ * 2. MuJoCoPandaDynamics (MuJoCo XML parameter implementation)
+ * 3. Recorded torque from experimental data
  */
 
 #include "identification/data_loader.hpp"
@@ -47,14 +47,14 @@ int main(int argc, char** argv) {
     std::cout << std::string(70, '=') << std::endl;
 
     // ====================================================================
-    // 1. 初始化两个动力学模型
+    // 1. Initialize both dynamics models
     // ====================================================================
     auto robot_model = robot::createFrankaPanda();
     robot::RobotDynamics robot_dynamics(*robot_model);
     mujoco_dynamics::MuJoCoPandaDynamics mujoco_dynamics;
 
     // ====================================================================
-    // 2. 加载数据
+    // 2. Load data
     // ====================================================================
     std::string data_file =
         (std::filesystem::path(PROJECT_ROOT_DIR) / "data" / "benchmark_data.csv")
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     std::cout << "\nLoaded " << data.n_samples << " samples." << std::endl;
 
     // ====================================================================
-    // 3. 选取测试样本
+    // 3. Select test samples
     // ====================================================================
     std::vector<std::size_t> test_indices = {100, 500, 1000, 2000, 3000, 5000};
     
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         printVector("tau (recorded)", tau_recorded);
 
         // ====================================================================
-        // 4. RobotDynamics 计算
+        // 4. RobotDynamics calculation
         // ====================================================================
         std::cout << "\n  [RobotDynamics - DH Parameters]" << std::endl;
         
@@ -98,10 +98,10 @@ int main(int argc, char** argv) {
         Eigen::MatrixXd C_rob = robot_dynamics.computeCoriolisMatrix(q, qd);
         Eigen::VectorXd G_rob = robot_dynamics.computeGravityVector(q);
         
-        // 基础动力学 (无 armature/damping)
+        // Base dynamics (no armature/damping)
         Eigen::VectorXd tau_rob_base = M_rob * qdd + C_rob * qd + G_rob;
         
-        // 添加 armature 和 damping (按 main.cpp 的方式)
+        // Add armature and damping (matching main.cpp approach)
         Eigen::VectorXd tau_rob = tau_rob_base;
         for (int k = 0; k < 7; ++k) {
             tau_rob(k) += 0.1 * qdd(k);  // armature
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
         printVector("+ armature*qdd + damp*qd", tau_rob);
 
         // ====================================================================
-        // 5. MuJoCoPandaDynamics 计算
+        // 5. MuJoCoPandaDynamics calculation
         // ====================================================================
         std::cout << "\n  [MuJoCoPandaDynamics - MuJoCo XML]" << std::endl;
         
@@ -120,24 +120,24 @@ int main(int argc, char** argv) {
         Eigen::MatrixXd C_mj = mujoco_dynamics.computeCoriolisMatrix(q, qd);
         Eigen::VectorXd G_mj = mujoco_dynamics.computeGravityVector(q);
         
-        // MuJoCoPandaDynamics::computeInverseDynamics 已包含 armature，但减去 damping
+        // MuJoCoPandaDynamics::computeInverseDynamics already includes armature, but subtracts damping
         Eigen::VectorXd tau_mj_fn = mujoco_dynamics.computeInverseDynamics(q, qd, qdd);
         
-        // 手动计算 (M 已包含 armature)
+        // Manual calculation (M already includes armature)
         Eigen::VectorXd tau_mj_base = M_mj * qdd + C_mj * qd + G_mj;
         
-        // 修正：damping 应该加上而不是减去
+        // Correction: damping should be added rather than subtracted
         Eigen::VectorXd tau_mj_corrected = tau_mj_base;
         for (int k = 0; k < 7; ++k) {
-            tau_mj_corrected(k) += 1.0 * qd(k);  // damping (加上)
+            tau_mj_corrected(k) += 1.0 * qd(k);  // damping (added)
         }
         
         printVector("M*qdd + C*qd + G", tau_mj_base);
-        printVector("(函数输出, -damp)", tau_mj_fn);
-        printVector("(修正后, +damp)", tau_mj_corrected);
+        printVector("(Function output, -damp)", tau_mj_fn);
+        printVector("(Corrected, +damp)", tau_mj_corrected);
 
         // ====================================================================
-        // 6. 误差分析
+        // 6. Error analysis
         // ====================================================================
         std::cout << "\n  [Error Analysis]" << std::endl;
         
@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
         total_elements += 7;
 
         // ====================================================================
-        // 7. 对比惯量矩阵对角线
+        // 7. Inertia matrix diagonal comparison
         // ====================================================================
         if (sample_idx == 1000) {
             std::cout << "\n  [Inertia Matrix Diagonal Comparison]" << std::endl;
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
             }
             std::cout << "]" << std::endl;
 
-            // 重力向量对比
+            // Gravity vector comparison
             std::cout << "\n  [Gravity Vector Comparison]" << std::endl;
             printVector("RobotDynamics G", G_rob);
             printVector("MuJoCoDynamics G", G_mj);
@@ -191,7 +191,7 @@ int main(int argc, char** argv) {
     }
 
     // ====================================================================
-    // 8. 总结
+    // 8. Summary
     // ====================================================================
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "  SUMMARY" << std::endl;
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
     }
 
     // ====================================================================
-    // 9. 检查记录的 tau 是否为 0 (早期样本)
+    // 9. Check if recorded tau is 0 (early samples)
     // ====================================================================
     std::cout << "\n" << std::string(70, '-') << std::endl;
     std::cout << "  CHECKING EARLY SAMPLES (tau = 0?)" << std::endl;

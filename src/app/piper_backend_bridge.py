@@ -16,11 +16,11 @@ from piper_real.bridge import run_stdio_loop
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Piper 真机后端桥接进程")
+    parser = argparse.ArgumentParser(description="Piper real robot backend bridge process")
     parser.add_argument(
         "--config",
         default=str(REPO_ROOT / "config" / "piper_real_experiment.yaml"),
-        help="真机实验配置文件路径",
+        help="Path to real robot experiment configuration file",
     )
     return parser.parse_args()
 

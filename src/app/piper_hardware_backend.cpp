@@ -44,12 +44,12 @@ void PiperHardwareBackend::startBridge() {
   int stdin_pipe[2];
   int stdout_pipe[2];
   if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
-    throw std::runtime_error("创建 bridge 管道失败");
+    throw std::runtime_error("Failed to create bridge pipes");
   }
 
   child_pid_ = fork();
   if (child_pid_ < 0) {
-    throw std::runtime_error("fork bridge 进程失败");
+    throw std::runtime_error("Failed to fork bridge process");
   }
 
   if (child_pid_ == 0) {
@@ -68,7 +68,7 @@ void PiperHardwareBackend::startBridge() {
   child_stdin_ = fdopen(stdin_pipe[1], "w");
   child_stdout_ = fdopen(stdout_pipe[0], "r");
   if (!child_stdin_ || !child_stdout_) {
-    throw std::runtime_error("打开 bridge 标准流失败");
+    throw std::runtime_error("Failed to open bridge standard streams");
   }
 }
 
@@ -99,7 +99,7 @@ void PiperHardwareBackend::stopBridge() {
 
 void PiperHardwareBackend::sendLine(const std::string &line) {
   if (!child_stdin_) {
-    throw std::runtime_error("bridge stdin 未初始化");
+    throw std::runtime_error("bridge stdin is not initialized");
   }
   std::fprintf(child_stdin_, "%s\n", line.c_str());
   std::fflush(child_stdin_);
@@ -107,18 +107,18 @@ void PiperHardwareBackend::sendLine(const std::string &line) {
 
 std::string PiperHardwareBackend::readLine() {
   if (!child_stdout_) {
-    throw std::runtime_error("bridge stdout 未初始化");
+    throw std::runtime_error("bridge stdout is not initialized");
   }
   std::array<char, 4096> buffer{};
   if (!std::fgets(buffer.data(), static_cast<int>(buffer.size()), child_stdout_)) {
-    throw std::runtime_error("读取 bridge 输出失败");
+    throw std::runtime_error("Failed to read bridge output");
   }
   std::string line(buffer.data());
   while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
     line.pop_back();
   }
   if (line.rfind("ERROR", 0) == 0) {
-    throw std::runtime_error("bridge 返回错误: " + line);
+    throw std::runtime_error("bridge returned error: " + line);
   }
   return line;
 }
@@ -128,7 +128,7 @@ ExperimentState PiperHardwareBackend::parseStateLine(const std::string &line) {
   std::string tag;
   stream >> tag;
   if (tag != "STATE") {
-    throw std::runtime_error("bridge 状态格式错误: " + line);
+    throw std::runtime_error("Invalid bridge state format: " + line);
   }
 
   ExperimentState state;
@@ -145,7 +145,7 @@ ExperimentState PiperHardwareBackend::parseStateLine(const std::string &line) {
     stream >> value;
   }
   if (!stream) {
-    throw std::runtime_error("bridge 状态字段数量不足: " + line);
+    throw std::runtime_error("Insufficient fields in bridge state: " + line);
   }
   return state;
 }

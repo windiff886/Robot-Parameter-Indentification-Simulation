@@ -44,10 +44,10 @@ ExperimentData DataLoader::loadCSV(const std::string &filename,
       } else if (row.size() == cols_without_qdd) {
         has_qdd = false;
       } else {
-        throw std::runtime_error("CSV 列数与配置的机械臂自由度不匹配: " +
-                                 std::to_string(row.size()) + " 列, 期望 " +
-                                 std::to_string(cols_with_qdd) + " 或 " +
-                                 std::to_string(cols_without_qdd) + " 列");
+        throw std::runtime_error("CSV column count does not match configured robot DOF: " +
+                                 std::to_string(row.size()) + " columns, expected " +
+                                 std::to_string(cols_with_qdd) + " or " +
+                                 std::to_string(cols_without_qdd) + " columns");
       }
       format_detected = true;
     }
@@ -55,9 +55,9 @@ ExperimentData DataLoader::loadCSV(const std::string &filename,
     // Validate row size
     const std::size_t expected_cols = has_qdd ? cols_with_qdd : cols_without_qdd;
     if (row.size() != expected_cols) {
-      throw std::runtime_error("CSV 数据行列数不一致: 实际 " +
-                               std::to_string(row.size()) + " 列, 期望 " +
-                               std::to_string(expected_cols) + " 列");
+      throw std::runtime_error("Inconsistent CSV column count: actual " +
+                               std::to_string(row.size()) + " columns, expected " +
+                               std::to_string(expected_cols) + " columns");
     }
 
     time_vec.push_back(row[0]);

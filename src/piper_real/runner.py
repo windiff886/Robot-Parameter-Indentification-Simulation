@@ -92,11 +92,11 @@ class RealExperimentRunner:
 
     def _assert_safe(self, state: RobotState) -> None:
         if state.has_error:
-            raise RuntimeError(f"机械臂状态异常，错误码: {state.arm_status_code}")
+            raise RuntimeError(f"Abnormal robot state, error code: {state.arm_status_code}")
         if self._config.joint_soft_limits:
             for index, (lower, upper) in enumerate(self._config.joint_soft_limits):
                 if not lower <= state.position[index] <= upper:
-                    raise RuntimeError(f"关节 {index + 1} 超出软限位")
+                    raise RuntimeError(f"Joint {index + 1} exceeds soft limit")
 
     def _build_command(self, elapsed: float) -> CommandFrame:
         if self._config.control_mode == "state_only":

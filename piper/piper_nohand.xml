@@ -18,12 +18,12 @@
   </default>
 
   <asset>
-    <!-- 材质定义 -->
+    <!-- Material definitions -->
     <material class="piper" name="white" rgba="1 1 1 1"/>
     <material class="piper" name="body_color" rgba="0.792157 0.819608 0.933333 1"/>
     <material class="piper" name="end_effector_color" rgba="0.898039 0.917647 0.929412 1"/>
 
-    <!-- Mesh 文件（同时用于视觉和碰撞） -->
+    <!-- Mesh files (used for both visual and collision) -->
     <mesh name="base_link" file="base_link.STL"/>
     <mesh name="link1" file="link1.STL"/>
     <mesh name="link2" file="link2.STL"/>
@@ -36,7 +36,7 @@
   <worldbody>
     <light name="top" pos="0 0 2" mode="trackcom"/>
     <body name="base_link" childclass="piper">
-      <!-- 基座 -->
+      <!-- Base link -->
       <inertial pos="-0.00473641 2.56829e-05 0.041452" mass="1.02"
         fullinertia="0.00267433 0.00282612 0.00089624 -0.00000073 -0.00017389 0.0000004"/>
       <geom mesh="base_link" material="body_color" class="visual"/>
@@ -98,7 +98,7 @@
     </body>
   </worldbody>
 
-  <!-- 纯力矩控制模式 -->
+  <!-- Pure torque control mode -->
   <actuator>
     <motor name="actuator1" joint="joint1" ctrlrange="-100 100" ctrllimited="true"/>
     <motor name="actuator2" joint="joint2" ctrlrange="-100 100" ctrllimited="true"/>

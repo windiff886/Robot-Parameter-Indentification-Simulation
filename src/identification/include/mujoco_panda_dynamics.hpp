@@ -1,6 +1,6 @@
 /**
  * @file mujoco_panda_dynamics.hpp
- * @brief 基于 MuJoCo XML 参数的 Franka Panda 动力学计算
+ * @brief Franka Panda dynamics calculation based on MuJoCo XML parameters
  */
 
 #pragma once

@@ -261,23 +261,23 @@
     <joint joint1="finger_joint1" joint2="finger_joint2" solimp="0.95 0.99 0.001" solref="0.005 1"/>
   </equality>
 
-  <!-- 纯力矩控制模式：ctrl 直接作为关节力矩输入 (τ = ctrl) -->
+  <!-- Pure torque control mode: ctrl directly serves as joint torque input (tau = ctrl) -->
   <actuator>
-    <!-- 关节 1-4: 大关节，力矩范围 ±87 Nm -->
+    <!-- Joints 1-4: large joints, torque range +/-87 Nm -->
     <motor name="actuator1" joint="joint1" ctrlrange="-87 87" ctrllimited="true"/>
     <motor name="actuator2" joint="joint2" ctrlrange="-87 87" ctrllimited="true"/>
     <motor name="actuator3" joint="joint3" ctrlrange="-87 87" ctrllimited="true"/>
     <motor name="actuator4" joint="joint4" ctrlrange="-87 87" ctrllimited="true"/>
-    <!-- 关节 5-7: 小关节，力矩范围 ±12 Nm -->
+    <!-- Joints 5-7: small joints, torque range +/-12 Nm -->
     <motor name="actuator5" joint="joint5" ctrlrange="-12 12" ctrllimited="true"/>
     <motor name="actuator6" joint="joint6" ctrlrange="-12 12" ctrllimited="true"/>
     <motor name="actuator7" joint="joint7" ctrlrange="-12 12" ctrllimited="true"/>
-    <!-- 夹爪: 力矩范围 ±20 N -->
+    <!-- Gripper: force range +/-20 N -->
     <motor name="actuator8" tendon="split" ctrlrange="-20 20" ctrllimited="true"/>
   </actuator>
 
   <keyframe>
-    <!-- home 位姿：ctrl 为初始力矩（全部为 0，机械臂将因重力下垂） -->
+    <!-- Home pose: ctrl is initial torque (all zeros, arm hangs under gravity) -->
     <key name="home" qpos="0 0 0 -1.57079 0 1.57079 -0.7853 0.04 0.04" ctrl="0 0 0 0 0 0 0 0"/>
   </keyframe>
 

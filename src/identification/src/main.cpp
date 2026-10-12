@@ -264,7 +264,7 @@ void saveResults(const fs::path &output_path, int algorithm_id,
 
   std::ofstream out(output_path);
   if (!out) {
-    throw std::runtime_error("无法写入结果文件: " + output_path.string());
+    throw std::runtime_error("Failed to write results file: " + output_path.string());
   }
 
   auto now = std::chrono::system_clock::now();
@@ -337,17 +337,17 @@ int main(int argc, char **argv) {
 
     config.robot = normalizeRobotType(config.robot);
     if (config.robot != "panda" && config.robot != "piper") {
-      throw std::runtime_error("robot 仅支持 panda 或 piper");
+      throw std::runtime_error("robot only supports panda or piper");
     }
 
     if (config.data_file.empty()) {
-      throw std::runtime_error("缺少 data_file");
+      throw std::runtime_error("Missing data_file");
     }
 
-    std::cout << "加载数据: " << config.data_file << std::endl;
-    std::cout << "机械臂配置: " << config.robot << std::endl;
+    std::cout << "Loading data: " << config.data_file << std::endl;
+    std::cout << "Robot configuration: " << config.robot << std::endl;
     ExperimentData data = DataLoader::loadCSV(config.data_file, robotDof(config.robot));
-    std::cout << "样本数: " << data.n_samples << std::endl;
+    std::cout << "Sample count: " << data.n_samples << std::endl;
 
     Identification identifier(config.robot);
     identifier.preprocess(data);
@@ -376,7 +376,7 @@ int main(int argc, char **argv) {
       const double rmse = std::sqrt(
           sum_sq_error /
           (static_cast<double>(data.n_samples) * static_cast<double>(n_dof)));
-      std::cout << "MuJoCo 动力学基准 RMSE: " << rmse << " Nm, Max Error: "
+      std::cout << "MuJoCo dynamics baseline RMSE: " << rmse << " Nm, Max Error: "
                 << max_error << " Nm" << std::endl;
     } else {
       mujoco_dynamics::MuJoCoPandaDynamics dynamics;
@@ -402,7 +402,7 @@ int main(int argc, char **argv) {
       const double rmse = std::sqrt(
           sum_sq_error /
           (static_cast<double>(data.n_samples) * static_cast<double>(n_dof)));
-      std::cout << "MuJoCo 动力学基准 RMSE: " << rmse << " Nm, Max Error: "
+      std::cout << "MuJoCo dynamics baseline RMSE: " << rmse << " Nm, Max Error: "
                 << max_error << " Nm" << std::endl;
     }
 
@@ -506,7 +506,7 @@ int main(int argc, char **argv) {
                   << " Nm, Max Error: " << result.torque_max_error << " Nm"
                   << std::endl;
       } catch (const std::exception &e) {
-        std::cerr << algorithm << " 求解失败: " << e.what() << std::endl;
+        std::cerr << algorithm << " solve failed: " << e.what() << std::endl;
       }
       results.push_back(result);
     }
@@ -526,12 +526,12 @@ int main(int argc, char **argv) {
 
     if (!config.output_file.empty()) {
       saveResults(config.output_file, config.algorithm, results);
-      std::cout << "结果已保存到: " << config.output_file << std::endl;
+      std::cout << "Results saved to: " << config.output_file << std::endl;
     }
 
     return 0;
   } catch (const std::exception &e) {
-    std::cerr << "identify 失败: " << e.what() << std::endl;
+    std::cerr << "identify failed: " << e.what() << std::endl;
     return 1;
   }
 }

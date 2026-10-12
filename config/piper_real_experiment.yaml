@@ -1,5 +1,5 @@
-# Piper 真机实验配置
-# 默认使用激励轨迹模式，通过 MIT 接口执行 Fourier 激励轨迹并采样
+# Piper real hardware experiment configuration
+# Uses excitation trajectory mode by default, executing Fourier excitation trajectory via MIT mode and sampling
 
 can_port: "can0"
 control_mode: "excitation_trajectory"
@@ -11,18 +11,18 @@ speed_rate: 20
 startup_timeout_sec: 3.0
 max_samples: 500
 
-# 6 轴安全初始位，单位 rad
+# 6-axis safe home position in rad
 home_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 move_to_home_before_start: true
 home_position_tolerance: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
 home_speed_rate: 15
 home_timeout_sec: 8.0
 
-# 仅在 position_validation 模式下生效
+# Only active in position_validation mode
 position_amplitude: [0.05, 0.05, 0.04, 0.03, 0.02, 0.02]
 position_frequency: [0.15, 0.18, 0.20, 0.22, 0.25, 0.28]
 
-# 在 mit_identification / excitation_trajectory 模式下生效
+# Active in mit_identification / excitation_trajectory mode
 trajectory_period: 10.0
 trajectory_harmonics: 5
 trajectory_coefficient_scale: 0.12
@@ -30,9 +30,9 @@ trajectory_seed: 42
 mit_kp: [10.0, 10.0, 9.0, 8.0, 6.0, 6.0]
 mit_kd: [0.8, 0.8, 0.7, 0.6, 0.4, 0.4]
 
-# 软限位，单位 rad；应按现场机械臂和工装重新核对
+# Soft limits in rad; verify against physical arm and mounting setup
 joint_soft_limits: [[-2.5, 2.5], [0.0, 3.0], [-2.9, 0.1], [-1.7, 1.7], [-1.2, 1.2], [-2.0, 2.0]]
 
-# bridge 命令保护，单位分别为 rad/s 和 N*m
+# Bridge command limits in rad/s and N*m respectively
 max_command_velocity: [1.5, 1.5, 1.2, 1.0, 0.8, 0.8]
 max_command_torque: [8.0, 8.0, 6.0, 5.0, 4.0, 4.0]

@@ -50,7 +50,7 @@ class PiperSdkAdapter:
             if self._sdk.EnablePiper():
                 return
             sleep_fn(0.05)
-        raise TimeoutError("Piper 使能超时")
+        raise TimeoutError("Timed out enabling Piper")
 
     def disable(self) -> None:
         if hasattr(self._sdk, "DisablePiper"):
@@ -120,7 +120,7 @@ class PiperSdkAdapter:
 
     def send_joint_position(self, positions_rad: list[float], speed_rate: int) -> None:
         if len(positions_rad) != 6:
-            raise ValueError("positions_rad 必须包含 6 个关节")
+            raise ValueError("positions_rad must contain 6 joints")
         joints_mdeg = [round(math.degrees(value) * 1000.0) for value in positions_rad]
         self._sdk.MotionCtrl_2(0x01, 0x01, int(speed_rate), 0x00)
         self._sdk.JointCtrl(*joints_mdeg)

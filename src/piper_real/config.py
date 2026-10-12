@@ -55,7 +55,7 @@ class RealExperimentConfig:
         )
         if self.joint_soft_limits:
             if len(self.joint_soft_limits) != 6:
-                raise ValueError("joint_soft_limits 必须包含 6 个关节范围")
+                raise ValueError("joint_soft_limits must contain 6 joint ranges")
             self.joint_soft_limits = [
                 (float(limit[0]), float(limit[1])) for limit in self.joint_soft_limits
             ]
@@ -139,7 +139,7 @@ def _strip_comment(line: str) -> str:
 
 def _split_key_value(line: str) -> tuple[str, str]:
     if ":" not in line:
-        raise ValueError(f"无法解析配置行: {line}")
+        raise ValueError(f"Failed to parse config line: {line}")
     key, value = line.split(":", 1)
     return key.strip(), value.strip()
 
@@ -168,19 +168,19 @@ def _parse_value(value: str):
 def _coerce_float_list(value: object) -> list[float]:
     if isinstance(value, (list, tuple)):
         return [float(item) for item in value]
-    raise ValueError(f"期望数组配置，收到: {value!r}")
+    raise ValueError(f"Expected array configuration, got: {value!r}")
 
 
 def _coerce_joint_limits(value: object) -> list[tuple[float, float]]:
     if value in (None, []):
         return []
     if not isinstance(value, (list, tuple)):
-        raise ValueError("joint_soft_limits 必须是二维数组")
+        raise ValueError("joint_soft_limits must be a 2D array")
     return [(float(item[0]), float(item[1])) for item in value]
 
 
 def _ensure_length(values: Iterable[float], field_name: str) -> list[float]:
     result = [float(value) for value in values]
     if len(result) != 6:
-        raise ValueError(f"{field_name} 必须包含 6 个元素")
+        raise ValueError(f"{field_name} must contain 6 elements")
     return result

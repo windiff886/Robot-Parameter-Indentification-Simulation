@@ -9,16 +9,15 @@
 namespace identification {
 
 // =============================================================================
-// 正则化求解辅助函数 (Tikhonov/Ridge Regression)
-// 正则化求解辅助函数 (Tikhonov/Ridge Regression)
+// Regularized solver helper function (Tikhonov/Ridge Regression)
 // =============================================================================
 namespace {
 const double kRegularizationLambda = 1e-6;
 
 inline Eigen::VectorXd solveRegularized(const Eigen::MatrixXd &W,
                                         const Eigen::VectorXd &tau) {
-  // 使用正规方程 (Normal Equations) 方法。
-  // 在剔除离群点后，矩阵不再极度病态，LDLT 速度快且有效。
+  // Use Normal Equations method.
+  // After outlier removal, the matrix is no longer severely ill-conditioned; LDLT is fast and effective.
   Eigen::MatrixXd WtW = W.transpose() * W;
   WtW +=
       kRegularizationLambda * Eigen::MatrixXd::Identity(WtW.rows(), WtW.cols());
@@ -85,10 +84,8 @@ createAlgorithm(const std::string &type, int dof) {
 // =============================================================================
 Eigen::VectorXd OLS::solve(const Eigen::MatrixXd &W,
                            const Eigen::VectorXd &Tau_meas) {
-  // 使用 SVD 直接求解 OLS
-  // 这比正规方程 (Normal Equations) 方法更慢但数值上更稳定，
-  // 使用正则化求解以防止参数数值爆炸
-  // (即使数据已过滤，某些参数仍可能不可辨识导致秩亏)
+  // Use regularized solve to prevent parameter explosion
+  // (even after data filtering, unidentifiable parameters may lead to rank deficiency)
   return solveRegularized(W, Tau_meas);
 }
 
@@ -99,7 +96,7 @@ WLS::WLS(int dof) : dof_(dof) {}
 
 Eigen::VectorXd WLS::solve(const Eigen::MatrixXd &W,
                            const Eigen::VectorXd &Tau_meas) {
-  // 使用正则化 OLS 计算初始估计
+  // Compute initial estimate using regularized OLS
   Eigen::VectorXd beta_ols = solveRegularized(W, Tau_meas);
   Eigen::VectorXd residual = Tau_meas - W * beta_ols;
 
@@ -129,7 +126,7 @@ Eigen::VectorXd WLS::solve(const Eigen::MatrixXd &W,
     }
   }
 
-  // 使用正则化求解加权最小二乘
+  // Solve weighted least squares using regularization
   return solveRegularized(W_weighted, Tau_weighted);
 }
 
@@ -140,7 +137,7 @@ IRLS::IRLS(int max_iter, double tol) : max_iter_(max_iter), tol_(tol) {}
 
 Eigen::VectorXd IRLS::solve(const Eigen::MatrixXd &W,
                             const Eigen::VectorXd &Tau_meas) {
-  // 使用正则化 OLS 初始化
+  // Initialize using regularized OLS
   Eigen::VectorXd beta = solveRegularized(W, Tau_meas);
   for (int k = 0; k < max_iter_; ++k) {
     Eigen::VectorXd residual = Tau_meas - W * beta;
@@ -168,7 +165,7 @@ Eigen::VectorXd IRLS::solve(const Eigen::MatrixXd &W,
       W_w.row(i) *= w_sqrt;
       Tau_w(i) *= w_sqrt;
     }
-    // 使用正则化求解
+    // Solve using regularization
     Eigen::VectorXd beta_new = solveRegularized(W_w, Tau_w);
     if ((beta_new - beta).norm() < tol_) {
       beta = beta_new;
@@ -286,11 +283,11 @@ NonlinearFrictionLM::predictTorques(const Eigen::MatrixXd &W_base,
       static_cast<Eigen::Index>(frictionParameterCount(dof));
 
   if (params.size() != linear_count + friction_count) {
-    throw std::runtime_error("NLS_FRICTION 参数维度与观测矩阵不匹配");
+    throw std::runtime_error("NLS_FRICTION parameter dimensions do not match observation matrix");
   }
   if (qd_meas.cols() != dof ||
       W_base.rows() != qd_meas.rows() * static_cast<Eigen::Index>(dof)) {
-    throw std::runtime_error("NLS_FRICTION 速度矩阵维度不匹配");
+    throw std::runtime_error("NLS_FRICTION velocity matrix dimensions do not match");
   }
 
   Eigen::VectorXd tau_pred = W_base * params.head(linear_count);
@@ -321,14 +318,14 @@ NonlinearFrictionLM::predictTorques(const Eigen::MatrixXd &W_base,
 Eigen::VectorXd NonlinearFrictionLM::solve(const Eigen::MatrixXd &W_base,
                                            const Eigen::VectorXd &Tau_meas) {
   if (qd_meas_.rows() == 0) {
-    throw std::runtime_error("NLS_FRICTION 缺少速度数据");
+    throw std::runtime_error("NLS_FRICTION missing velocity data");
   }
   if (qd_meas_.cols() != dof_) {
-    throw std::runtime_error("NLS_FRICTION 速度自由度不匹配");
+    throw std::runtime_error("NLS_FRICTION velocity DOF mismatch");
   }
   if (W_base.rows() != Tau_meas.size() ||
       W_base.rows() != qd_meas_.rows() * dof_) {
-    throw std::runtime_error("NLS_FRICTION 训练数据维度不一致");
+    throw std::runtime_error("NLS_FRICTION training data dimensions inconsistent");
   }
 
   const Eigen::Index linear_count = W_base.cols();

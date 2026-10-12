@@ -1,6 +1,6 @@
 /**
  * @file regressor_test.cpp
- * @brief 验证 MuJoCoRegressor 的正确性
+ * @brief Validate the correctness of MuJoCoRegressor
  */
 
 #include "identification/data_loader.hpp"
@@ -22,7 +22,7 @@ void printVector(const std::string &name, const Eigen::VectorXd &v) {
 
 int main() {
   std::cout << std::string(80, '=') << "\n";
-  std::cout << "  MuJoCoRegressor 验证测试\n";
+  std::cout << "  MuJoCoRegressor Validation Test\n";
   std::cout << std::string(80, '=') << "\n";
 
   mujoco_dynamics::MuJoCoRegressor regressor;
@@ -30,14 +30,14 @@ int main() {
 
   auto theta_true =
       regressor.computeParameterVector(mujoco_dynamics::MuJoCoParamFlags::ALL);
-  std::cout << "\n参数数量: " << theta_true.size() << "\n";
+  std::cout << "\nNumber of parameters: " << theta_true.size() << "\n";
 
   // ====================================================================
-  // 测试 1: 单点验证
+  // Test 1: Single-point validation
   // ====================================================================
   std::cout << "\n" << std::string(80, '-') << "\n";
   std::cout
-      << "  测试 1: 与 MuJoCoPandaDynamics::computeInverseDynamics 对比\n";
+      << "  Test 1: Comparison with MuJoCoPandaDynamics::computeInverseDynamics\n";
   std::cout << std::string(80, '-') << "\n";
 
   Eigen::VectorXd q(7), qd(7), qdd(7);
@@ -50,30 +50,30 @@ int main() {
   Eigen::VectorXd tau_regressor = Y * theta_true;
   Eigen::VectorXd tau_dynamics = dynamics.computeInverseDynamics(q, qd, qdd);
 
-  printVector("τ (Regressor: Y * θ)", tau_regressor);
-  printVector("τ (Dynamics: ID)", tau_dynamics);
-  printVector("差值", tau_regressor - tau_dynamics);
+  printVector("tau (Regressor: Y * theta)", tau_regressor);
+  printVector("tau (Dynamics: ID)", tau_dynamics);
+  printVector("Difference", tau_regressor - tau_dynamics);
 
   double rmse = std::sqrt((tau_regressor - tau_dynamics).squaredNorm() / 7.0);
   std::cout << "\n  RMSE (Regressor vs Dynamics): " << rmse << " Nm\n";
 
   if (rmse < 0.2) {
-    std::cout << "  [OK] Regressor 与 Dynamics 结果一致！\n";
+    std::cout << "  [OK] Regressor matches Dynamics results!\n";
   } else {
-    std::cout << "  [ERROR] Regressor 与 Dynamics 结果不一致！\n";
+    std::cout << "  [ERROR] Regressor does not match Dynamics results!\n";
   }
 
   // ====================================================================
-  // 测试 2: 多样本验证（与实验数据对比）
+  // Test 2: Multi-sample validation (comparison with experimental data)
   // ====================================================================
   std::cout << "\n" << std::string(80, '-') << "\n";
-  std::cout << "  测试 2: 多样本验证（与 MuJoCo 记录数据对比）\n";
+  std::cout << "  Test 2: Multi-sample validation (comparison with MuJoCo recorded data)\n";
   std::string data_file = "/home/windiff/Code/Simulation/data/"
                           "benchmark_data_2026-01-18_15-54-50.csv";
 
   DataLoader loader;
   ExperimentData data = loader.loadCSV(data_file, 7);
-  std::cout << "  加载样本数: " << data.n_samples << "\n";
+  std::cout << "  Loaded sample count: " << data.n_samples << "\n";
   std::cout << std::string(80, '-') << "\n";
 
   double sum_sq_error_vs_dynamics = 0.0;
@@ -99,14 +99,14 @@ int main() {
     tau_regressor = Y * theta_true;
     tau_dynamics = dynamics.computeInverseDynamics(q, qd, qdd);
 
-    // MuJoCo computeInverseDynamics 返回 τ = M*qdd + C*qd + G - damping*qd
-    // 但记录的 tau 是控制扭矩 τ_ctrl = M*qdd + C*qd + G - damping*qd
-    // 所以应该直接一致
+    // MuJoCo computeInverseDynamics returns tau = M*qdd + C*qd + G - damping*qd
+    // And recorded tau is control torque tau_ctrl = M*qdd + C*qd + G - damping*qd
+    // Therefore they should match directly
 
     std::cout << "\n  Sample " << idx << " (t = " << data.time[idx] << " s):\n";
-    printVector("τ (Regressor)", tau_regressor);
-    printVector("τ (Dynamics)", tau_dynamics);
-    printVector("τ (Recorded)", tau_recorded);
+    printVector("tau (Regressor)", tau_regressor);
+    printVector("tau (Dynamics)", tau_dynamics);
+    printVector("tau (Recorded)", tau_recorded);
 
     Eigen::VectorXd err_vs_dynamics = tau_regressor - tau_dynamics;
     Eigen::VectorXd err_vs_recorded = tau_regressor - tau_recorded;
@@ -123,10 +123,10 @@ int main() {
   }
 
   // ====================================================================
-  // 总结
+  // Summary
   // ====================================================================
   std::cout << "\n" << std::string(80, '=') << "\n";
-  std::cout << "  总结\n";
+  std::cout << "  Summary\n";
   std::cout << std::string(80, '=') << "\n";
 
   double overall_rmse_vs_dynamics =
@@ -140,11 +140,11 @@ int main() {
             << " Nm\n";
 
   if (overall_rmse_vs_dynamics < 0.2 && overall_rmse_vs_recorded < 0.5) {
-    std::cout << "\n  [OK] MuJoCoRegressor 验证通过！可用于参数辨识。\n";
+    std::cout << "\n  [OK] MuJoCoRegressor validation passed! Ready for parameter identification.\n";
   } else if (overall_rmse_vs_recorded < 1.0) {
-    std::cout << "\n  [WARNING] RMSE 略高，可能存在一些偏差。\n";
+    std::cout << "\n  [WARNING] RMSE slightly elevated; minor discrepancies may exist.\n";
   } else {
-    std::cout << "\n  [ERROR] MuJoCoRegressor 验证失败！\n";
+    std::cout << "\n  [ERROR] MuJoCoRegressor validation failed!\n";
   }
 
   return 0;

@@ -98,7 +98,7 @@ ForceController::ForceController(const ForceControllerConfig &config,
   arm_dof_ = config_.kp.size();
   if (arm_dof_ == 0 || config_.kd.size() != arm_dof_ ||
       config_.target_position.size() != arm_dof_) {
-    throw std::runtime_error("控制器配置必须包含等长且非空的 kp/kd/target_position");
+    throw std::runtime_error("Controller config must contain non-empty kp/kd/target_position of equal length");
   }
 
   collision_checker_.initialize(collision_model.string());
@@ -108,10 +108,10 @@ ForceController::ForceController(const ForceControllerConfig &config,
   collision_home_ = collision_checker_.homeConfiguration();
 
   if (joint_lower_limits_.size() < arm_dof_ || joint_upper_limits_.size() < arm_dof_) {
-    throw std::runtime_error("碰撞模型中的关节数量不足，无法匹配控制器维度");
+    throw std::runtime_error("Insufficient joint count in collision model to match controller dimensions");
   }
   if (actuator_limits_.size() < arm_dof_) {
-    throw std::runtime_error("碰撞模型中的执行器数量不足，无法匹配控制器维度");
+    throw std::runtime_error("Insufficient actuator count in collision model to match controller dimensions");
   }
   initExcitationTrajectory();
 }
@@ -134,8 +134,8 @@ void ForceController::initExcitationTrajectory() {
     trajectory_->applyInitialConditionConstraints();
     if (checkTrajectory(*trajectory_)) {
       valid_trajectory = true;
-      std::cout << "找到安全激励轨迹，尝试次数: " << (attempt + 1)
-                << "，幅值: " << amplitude << std::endl;
+      std::cout << "Found safe excitation trajectory, attempt: " << (attempt + 1)
+                << ", amplitude: " << amplitude << std::endl;
       break;
     }
     if (attempt > 20 && amplitude > 0.01) {
@@ -144,7 +144,7 @@ void ForceController::initExcitationTrajectory() {
   }
 
   if (!valid_trajectory) {
-    std::cout << "警告: 未找到完全安全的轨迹，将使用最后一次生成结果"
+    std::cout << "Warning: No completely safe trajectory found; using last generated result"
               << std::endl;
   }
 }
@@ -179,7 +179,7 @@ bool ForceController::checkTrajectory(const trajectory::FourierTrajectory &traj)
 ControlCommand ForceController::computeCommand(const JointSample &sample,
                                                double current_time) {
   if (sample.position.size() < arm_dof_ || sample.velocity.size() < arm_dof_) {
-    throw std::runtime_error("关节状态维度不足，无法覆盖当前机械臂的控制关节");
+    throw std::runtime_error("Insufficient joint state dimensions to cover controlled arm joints");
   }
 
   ControlCommand command;
@@ -192,7 +192,7 @@ ControlCommand ForceController::computeCommand(const JointSample &sample,
   if (!trajectory_started_ && mode_ == ControllerMode::EXCITATION_TRAJECTORY) {
     trajectory_start_time_ = current_time;
     trajectory_started_ = true;
-    std::cout << "开始执行激励轨迹，t=" << current_time << " s" << std::endl;
+    std::cout << "Starting excitation trajectory execution, t=" << current_time << " s" << std::endl;
   }
 
   if (mode_ == ControllerMode::HOLD_POSITION || trajectory_finished_) {
@@ -206,12 +206,12 @@ ControlCommand ForceController::computeCommand(const JointSample &sample,
     const double trajectory_time = current_time - trajectory_start_time_;
     if (trajectory_time >= trajectory_duration_) {
       trajectory_finished_ = true;
-      std::cout << "激励轨迹执行结束，切换为定点保持模式" << std::endl;
+      std::cout << "Excitation trajectory execution ended, switching to hold mode" << std::endl;
       if (total_samples_ > 0) {
         const double ratio =
             100.0 * static_cast<double>(saturated_samples_) /
             static_cast<double>(total_samples_);
-        std::cout << "力矩饱和占比: " << ratio << "%" << std::endl;
+        std::cout << "Torque saturation percentage: " << ratio << "%" << std::endl;
       }
       for (std::size_t i = 0; i < arm_dof_; ++i) {
         command.desired_position[i] = config_.target_position[i];
@@ -233,7 +233,7 @@ ControlCommand ForceController::computeCommand(const JointSample &sample,
       }
 
       if (trajectory_time - last_print_time_ >= 2.0) {
-        std::cout << "轨迹进度: " << trajectory_time << " / "
+        std::cout << "Trajectory progress: " << trajectory_time << " / "
                   << trajectory_duration_ << " s" << std::endl;
         last_print_time_ = trajectory_time;
       }
